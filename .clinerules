@@ -1,0 +1,261 @@
+# .clinerules - Music Pattern Analyzer Project Guidelines
+
+## Project Context
+This is a music analysis web application that helps producers deconstruct songs by converting audio snippets into visual MIDI patterns. We're building an MVP focused on drum pattern analysis first, then expanding to other instruments.
+
+## Core Technologies
+- Backend: Django 4.x + Django REST Framework
+- Frontend: React 18+ (functional components only)
+- Audio Processing: Spleeter (stem separation) + librosa (onset detection)
+- Visualization: wavesurfer.js + HTML5 Canvas/Tone.js
+
+## File Structure Rules
+
+### Backend Structure
+- All API endpoints go in `backend/api/views.py`
+- Audio processing logic belongs in `backend/audio_processing/` directory
+- Keep Spleeter integration in `stem_separator.py`
+- Keep onset detection in `onset_detector.py`
+- Keep MIDI conversion in `midi_converter.py`
+- Utility functions go in `audio_processing/utils.py`
+
+### Frontend Structure
+- Components go in `src/components/`
+- Use functional components with hooks only (no class components)
+- API calls centralized in `src/services/api.js`
+- Each component should be in its own file
+
+## Code Style Guidelines
+
+### Python (Backend)
+- Follow PEP 8 strictly
+- Use type hints for all function parameters and return values
+- Use descriptive variable names (no single letters except for loop indices)
+- Add docstrings to all functions explaining purpose, params, and returns
+- Example:
+  ```python
+  def detect_drum_onsets(audio_path: str, sr: int = 22050) -> list[float]:
+      """
+      Detect onset times of drum hits in an audio file.
+      
+      Args:
+          audio_path: Path to the audio file
+          sr: Sample rate for audio processing
+          
+      Returns:
+          List of timestamps (in seconds) where drum hits occur
+      """
+  ```
+
+### JavaScript/React (Frontend)
+- Use arrow functions for components
+- Destructure props in function parameters
+- Use meaningful variable names (e.g., `drumOnsets` not `data`)
+- Keep components under 200 lines (break into smaller components if needed)
+- Use async/await for API calls (not .then())
+- Example:
+  ```javascript
+  const PianoRoll = ({ midiData, duration }) => {
+    // component logic
+  };
+  ```
+
+## Audio Processing Rules
+
+### Spleeter Usage
+- Always use the 4-stem model (drums, bass, vocals, other)
+- Extract only the stem needed (drums for MVP)
+- Clean up temporary files after processing
+- Handle Spleeter errors gracefully (some audio formats may fail)
+
+### librosa Guidelines
+- Use `onset.onset_detect()` for drum hit detection
+- Set appropriate `hop_length` and `backtrack` parameters
+- Convert sample indices to timestamps using sample rate
+- Test parameters on various genres (electronic, rock, hip-hop, jazz)
+
+### Drum Classification
+- Use frequency analysis to distinguish kick/snare/hihat
+- Kick drum: 20-100 Hz (focus on sub-bass frequencies)
+- Snare drum: 150-250 Hz (fundamental frequency range)
+- Hi-hat: 5000+ Hz (high-frequency content)
+- If classification confidence is low, label as "unknown" rather than guessing
+
+### Audio File Handling
+- Accept MP3, WAV, FLAC formats
+- Validate file size (max 50MB for MVP)
+- Convert all audio to 44.1kHz stereo for consistent processing
+- Store uploads temporarily and delete after 1 hour
+- Use absolute paths for file operations
+
+## API Design Rules
+
+### Endpoints
+- Use RESTful conventions (POST for actions, GET for retrieval)
+- Return consistent JSON structure:
+  ```json
+  {
+    "status": "success" | "error",
+    "data": {...},
+    "message": "Optional message"
+  }
+  ```
+- Include proper HTTP status codes (200, 400, 500)
+- Add request validation using DRF serializers
+
+### Error Handling
+- Catch all exceptions in API views
+- Return user-friendly error messages
+- Log detailed errors server-side for debugging
+- Never expose internal paths or stack traces to users
+
+## Performance Guidelines
+
+### Backend Optimization
+- Processing should complete in under 30 seconds for MVP
+- Use `hop_length` parameter in librosa to balance speed vs accuracy
+- Cache processed results using file hash as key (post-MVP)
+- Consider adding progress updates for long-running processes
+
+### Frontend Optimization
+- Lazy load components not needed on initial render
+- Show loading states immediately when user clicks "Analyze"
+- Display progress indicators during processing
+- Optimize waveform rendering for large files
+
+## Testing Requirements
+
+### What to Test
+- Audio processing functions with sample files
+- API endpoints with valid and invalid inputs
+- Edge cases: very short clips, silent audio, corrupted files
+- Different music genres and tempos
+
+### Test Data
+- Keep sample audio files in `backend/storage/test_samples/`
+- Include variety: rock, hip-hop, electronic, jazz, classical
+- Test with both high-quality and compressed audio
+
+## UI/UX Guidelines
+
+### User Experience
+- Show clear feedback for every user action
+- Display helpful error messages (e.g., "Audio file too large. Please upload files under 50MB")
+- Add tooltips for technical terms (MIDI, onset, stem)
+- Make the snippet selection intuitive with visual feedback
+
+### Design Consistency
+- Use Tailwind utility classes (avoid custom CSS unless necessary)
+- Maintain consistent spacing and colors throughout
+- Make interactive elements obviously clickable (hover states, cursor changes)
+- Ensure mobile responsiveness even though desktop is primary target
+
+## Security Rules
+
+### Input Validation
+- Validate all file uploads (type, size, content)
+- Sanitize filename inputs
+- Rate limit API endpoints (post-MVP: 10 requests per minute per user)
+- Use CORS properly to restrict frontend origins
+
+### Data Privacy
+- Don't store user audio files permanently
+- Auto-delete uploads after processing completes
+- No user authentication required for MVP (add later)
+- Don't log sensitive information
+
+## Git Workflow
+
+### Commits
+- Make small, focused commits
+- Use descriptive commit messages: "Add drum onset detection" not "Update file"
+- Commit working code (don't break the build)
+- Test before committing
+
+### Branches
+- `main` branch is for stable code only
+- Work in feature branches: `feature/onset-detection`
+- Merge to main after testing
+
+## Development Workflow
+
+### Incremental Development
+- Build one feature at a time
+- Test each feature thoroughly before moving to next
+- Don't optimize prematurely (get it working first, then make it fast)
+- Keep the app in a runnable state as much as possible
+
+### When Stuck
+- Check documentation first (Spleeter, librosa, DRF)
+- Test with simpler inputs (shorter clips, cleaner audio)
+- Add print/console.log statements to debug
+- Ask for help with specific error messages, not vague issues
+
+## Common Pitfalls to Avoid
+
+### Backend
+- Don't use synchronous processing for long tasks (add Celery later)
+- Don't forget to close file handles after reading
+- Don't hardcode file paths (use Django settings)
+- Don't return raw errors to frontend (sanitize first)
+
+### Frontend
+- Don't mutate state directly (use setState or hooks properly)
+- Don't make API calls in render methods
+- Don't forget to handle loading and error states
+- Don't hardcode API URLs (use environment variables)
+
+### Audio Processing
+- Don't assume all audio files are clean (handle noise)
+- Don't skip normalization (audio levels vary widely)
+- Don't process entire songs (stick to snippets)
+- Don't trust onset detection 100% (it will have false positives/negatives)
+
+## MVP Scope Boundaries
+
+### What's In Scope
+- Upload audio file
+- Select 15-30 second snippet
+- Analyze drums only
+- Display visual MIDI pattern
+- Basic error handling
+
+### What's Out of Scope (For Now)
+- User accounts and authentication
+- Saving/sharing analyses
+- MIDI file export
+- Other instruments (bass, melody, chords)
+- Real-time processing
+- Mobile app version
+- Collaborative features
+
+## When to Ask for Help
+
+### Good Questions
+- "How do I improve onset detection accuracy for electronic music?"
+- "What's the best way to visualize this MIDI data with Canvas?"
+- "How should I structure this API endpoint to handle large files?"
+
+### Questions to Avoid
+- "Make it work" (be specific about what's not working)
+- "Fix my code" (explain what you've tried and what error you're getting)
+
+## Success Criteria
+
+### MVP is Complete When
+- User can upload audio and get drum pattern visualization
+- Processing takes under 30 seconds per snippet
+- Works with at least 3 different music genres
+- UI is intuitive without needing instructions
+- No critical bugs in core functionality
+
+## Additional Notes
+
+- Prioritize functionality over perfection for MVP
+- User feedback will guide future development
+- Document decisions and technical debt as you go
+- Keep README.md updated with latest status
+
+---
+
+Remember: We're building a minimum viable product to validate the concept. Focus on core functionality first, polish later. Get it working, get feedback, iterate.
