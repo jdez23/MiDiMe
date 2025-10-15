@@ -1,29 +1,46 @@
-# .clinerules - Music Pattern Analyzer Project Guidelines
+# .clinerules - Music Pattern Analyzer (MiDiMe) Project Guidelines
 
 ## Project Context
-This is a music analysis web application that helps producers deconstruct songs by converting audio snippets into visual MIDI patterns. We're building an MVP focused on drum pattern analysis first, then expanding to other instruments.
+This is a music analysis web application that helps producers deconstruct songs by converting audio snippets into visual MIDI patterns, then discover similar patterns across a community database. We're building an MVP focused on drum pattern analysis first, then expanding to other instruments and pattern similarity search.
+
+**Key Differentiator**: We're not just analyzing songs - we're building a pattern database with network effects. Every upload makes pattern discovery smarter for all users.
 
 ## Core Technologies
 - Backend: Django 4.x + Django REST Framework
 - Frontend: React 18+ (functional components only)
-- Audio Processing: Spleeter (stem separation) + librosa (onset detection)
+- Audio Processing: Spleeter (stem separation) + librosa (onset detection) + Chromaprint (audio fingerprinting)
+- Pattern Matching: NumPy/SciPy (vector math) + FAISS/Pinecone (similarity search at scale)
 - Visualization: wavesurfer.js + HTML5 Canvas/Tone.js
+- Task Queue: Celery + Redis (async processing)
+- Database: PostgreSQL (structured data + pattern storage)
 
 ## File Structure Rules
 
 ### Backend Structure
 - All API endpoints go in `backend/api/views.py`
-- Audio processing logic belongs in `backend/audio_processing/` directory
-- Keep Spleeter integration in `stem_separator.py`
-- Keep onset detection in `onset_detector.py`
-- Keep MIDI conversion in `midi_converter.py`
-- Utility functions go in `audio_processing/utils.py`
+- Tier-based access control in `backend/api/permissions.py`
+- Audio processing logic belongs in `backend/audio_processing/` directory:
+  - `stem_separator.py` - Spleeter integration
+  - `onset_detector.py` - librosa onset detection
+  - `midi_converter.py` - Convert onsets to MIDI
+  - `fingerprinting.py` - Create pattern vectors (NEW)
+  - `duplicate_detection.py` - Audio fingerprint matching (NEW)
+  - `utils.py` - Utility functions
+- Pattern similarity logic in `backend/similarity/` directory (NEW):
+  - `search.py` - Pattern similarity search
+  - `vector_index.py` - FAISS/vector database integration
+  - `ranking.py` - Result ranking algorithms
+- Database models in `backend/models.py`
+- Celery tasks in `backend/tasks.py`
 
 ### Frontend Structure
 - Components go in `src/components/`
 - Use functional components with hooks only (no class components)
 - API calls centralized in `src/services/api.js`
 - Each component should be in its own file
+- New components for pattern discovery:
+  - `SimilaritySearch.jsx` - Search similar patterns UI
+  - `ResultsGrid.jsx` - Display search results
 
 ## Code Style Guidelines
 
@@ -32,19 +49,25 @@ This is a music analysis web application that helps producers deconstruct songs 
 - Use type hints for all function parameters and return values
 - Use descriptive variable names (no single letters except for loop indices)
 - Add docstrings to all functions explaining purpose, params, and returns
+- For pattern fingerprinting, include units in variable names (e.g., `tempo_bpm`, `duration_seconds`)
 - Example:
   ```python
-  def detect_drum_onsets(audio_path: str, sr: int = 22050) -> list[float]:
+  def create_drum_fingerprint(drum_pattern: dict) -> np.ndarray:
       """
-      Detect onset times of drum hits in an audio file.
+      Create a 60-dimensional vector fingerprint of a drum pattern.
       
       Args:
-          audio_path: Path to the audio file
-          sr: Sample rate for audio processing
+          drum_pattern: Dict with keys 'kick_pattern', 'snare_pattern', 
+                       'hihat_pattern', 'tempo', 'onset_times'
           
       Returns:
-          List of timestamps (in seconds) where drum hits occur
+          NumPy array of shape (60,) representing the pattern fingerprint
       """
+      features = []
+      # Calculate rhythmic density
+      kick_density = len(drum_pattern['kick_pattern']) / duration_seconds
+      # ... rest of implementation
+      return np.array(features)
   ```
 
 ### JavaScript/React (Frontend)
@@ -55,8 +78,25 @@ This is a music analysis web application that helps producers deconstruct songs 
 - Use async/await for API calls (not .then())
 - Example:
   ```javascript
-  const PianoRoll = ({ midiData, duration }) => {
-    // component logic
+  const SimilaritySearch = ({ songId, instrument, userTier }) => {
+    const [results, setResults] = useState([]);
+    const [loading, setLoading] = useState(false);
+    
+    const searchSimilar = async () => {
+      setLoading(true);
+      try {
+        const response = await api.searchSimilar(songId, instrument);
+        setResults(response.data.results);
+      } catch (error) {
+        console.error('Search failed:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    return (
+      // component JSX
+    );
   };
   ```
 
@@ -64,15 +104,36 @@ This is a music analysis web application that helps producers deconstruct songs 
 
 ### Spleeter Usage
 - Always use the 4-stem model (drums, bass, vocals, other)
-- Extract only the stem needed (drums for MVP)
+- Extract only the stem needed (drums for MVP, all stems for later phases)
 - Clean up temporary files after processing
 - Handle Spleeter errors gracefully (some audio formats may fail)
+- Set output format to WAV for consistency
 
 ### librosa Guidelines
 - Use `onset.onset_detect()` for drum hit detection
 - Set appropriate `hop_length` and `backtrack` parameters
 - Convert sample indices to timestamps using sample rate
 - Test parameters on various genres (electronic, rock, hip-hop, jazz)
+- For pattern fingerprinting, use consistent parameters:
+  - Sample rate: 44.1kHz
+  - Hop length: 512 samples
+  - Window size: 2048 samples
+
+### Chromaprint (Audio Fingerprinting) - NEW
+- Use for duplicate detection of source songs
+- Generate fingerprint immediately after upload
+- Compare against existing fingerprints in database
+- Similarity threshold for duplicates: 0.85 (85% match)
+- Store fingerprints as TEXT in database (not binary)
+- Example:
+  ```python
+  import chromaprint
+  
+  def generate_audio_fingerprint(audio_path: str) -> str:
+      """Generate acoustic fingerprint for duplicate detection."""
+      fingerprint = chromaprint.encode(audio_path)
+      return fingerprint
+  ```
 
 ### Drum Classification
 - Use frequency analysis to distinguish kick/snare/hihat
@@ -81,12 +142,282 @@ This is a music analysis web application that helps producers deconstruct songs 
 - Hi-hat: 5000+ Hz (high-frequency content)
 - If classification confidence is low, label as "unknown" rather than guessing
 
+### Pattern Fingerprinting (NEW - Phase 7)
+**Critical for similarity search - this is our moat!**
+
+**Drum Pattern Fingerprint (60 dimensions):**
+```python
+def create_drum_fingerprint(drum_pattern: dict, duration_seconds: float) -> np.ndarray:
+    """
+    Create 60-dimensional vector for drum pattern.
+    
+    Features:
+    - [0:3] Rhythmic density (kick, snare, hihat) per second
+    - [3] Syncopation measure (0-1)
+    - [4:20] Kick pattern on 16-step grid (binary)
+    - [20:36] Snare pattern on 16-step grid (binary)
+    - [36:52] Hi-hat pattern on 16-step grid (binary)
+    - [52] Tempo (BPM)
+    - [53] Velocity variance
+    - [54:60] Additional groove features
+    """
+    features = []
+    
+    # Rhythmic density
+    features.extend([
+        len(drum_pattern['kick_pattern']) / duration_seconds,
+        len(drum_pattern['snare_pattern']) / duration_seconds,
+        len(drum_pattern['hihat_pattern']) / duration_seconds
+    ])
+    
+    # Syncopation (measure of off-beat-ness)
+    syncopation = calculate_syncopation(drum_pattern['onset_times'])
+    features.append(syncopation)
+    
+    # Binary groove grids (16 steps per pattern)
+    kick_grid = quantize_to_binary_grid(drum_pattern['kick_pattern'], 16)
+    snare_grid = quantize_to_binary_grid(drum_pattern['snare_pattern'], 16)
+    hihat_grid = quantize_to_binary_grid(drum_pattern['hihat_pattern'], 16)
+    features.extend(kick_grid + snare_grid + hihat_grid)
+    
+    # Tempo and velocity
+    features.append(drum_pattern['tempo'])
+    features.append(calculate_velocity_variance(drum_pattern))
+    
+    # Additional features (to be determined)
+    features.extend([0.0] * 6)  # Placeholder for future features
+    
+    return np.array(features, dtype=np.float64)
+```
+
+**Bass Pattern Fingerprint (50 dimensions):**
+- Note density, pitch range, melodic contour
+- Rhythmic pattern grid (32 steps)
+- Key signature encoding
+- (Implementation in Phase 10)
+
+**Chord Pattern Fingerprint (40 dimensions):**
+- Chord change frequency, complexity
+- Progression encoding (up to 8 chords)
+- Harmonic rhythm features
+- (Implementation in Phase 10)
+
 ### Audio File Handling
 - Accept MP3, WAV, FLAC formats
 - Validate file size (max 50MB for MVP)
 - Convert all audio to 44.1kHz stereo for consistent processing
-- Store uploads temporarily and delete after 1 hour
+- **Delete audio files immediately after processing** (only keep patterns)
 - Use absolute paths for file operations
+- Generate MD5 hash for file deduplication
+
+## Database Schema Rules
+
+### songs Table
+```sql
+CREATE TABLE songs (
+    song_id VARCHAR(36) PRIMARY KEY,
+    source_song_id VARCHAR(36),      -- Groups sections from same song
+    audio_fingerprint TEXT,          -- Chromaprint fingerprint
+    section_label VARCHAR(20),       -- intro/verse/chorus/bridge/drop
+    user_id VARCHAR(36),
+    upload_date TIMESTAMP,
+    duration INTEGER,                -- in seconds
+    tempo FLOAT,
+    detected_key VARCHAR(10),
+    detected_genre VARCHAR(50),
+    file_hash VARCHAR(64),           -- MD5 hash
+    privacy_setting VARCHAR(10),     -- public/private
+    INDEX(user_id),
+    INDEX(source_song_id),
+    INDEX(audio_fingerprint)
+);
+```
+
+**Important Rules:**
+- `source_song_id` groups multiple sections from the same song
+- `audio_fingerprint` used for duplicate detection
+- `section_label` auto-detected or inferred from analysis
+- `privacy_setting` defaults to 'public' for free tier
+
+### patterns Table (NEW - Phase 3)
+```sql
+CREATE TABLE patterns (
+    pattern_id VARCHAR(36) PRIMARY KEY,
+    song_id VARCHAR(36),
+    instrument_type VARCHAR(20),     -- drums/bass/chords/melody
+    midi_data JSON,                  -- Actual note/hit data
+    tempo FLOAT,
+    key_signature VARCHAR(10),
+    fingerprint BLOB,                -- Vector (60-100 dimensions)
+    quality_score FLOAT,             -- Extraction confidence (0-1)
+    created_at TIMESTAMP,
+    FOREIGN KEY (song_id) REFERENCES songs(song_id),
+    INDEX(song_id),
+    INDEX(instrument_type)
+);
+```
+
+**Important Rules:**
+- `fingerprint` stored as BLOB (binary numpy array)
+- `midi_data` stored as JSON for flexibility
+- `quality_score` indicates confidence in pattern extraction
+- One pattern record per instrument per song
+
+### pattern_similarities Table (NEW - Phase 7, optional)
+```sql
+CREATE TABLE pattern_similarities (
+    similarity_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    pattern_id_1 VARCHAR(36),
+    pattern_id_2 VARCHAR(36),
+    similarity_score FLOAT,          -- 0.0 to 1.0
+    instrument_type VARCHAR(20),
+    computed_at TIMESTAMP,
+    INDEX(pattern_id_1),
+    INDEX(similarity_score DESC)
+);
+```
+
+**Important Rules:**
+- Pre-computed for performance (optional)
+- Computed in background by Celery workers
+- Only store scores > 0.6 (meaningful similarities)
+- Recompute when new patterns added
+
+## Duplicate Detection Strategy (NEW - Phase 2)
+
+### Level 1: Audio Fingerprinting
+```python
+def check_duplicate_source(audio_path: str, user_id: str, user_tier: str) -> dict:
+    """
+    Check if uploaded audio is from a song already in database.
+    
+    Returns:
+        {
+            'is_duplicate': bool,
+            'source_song_id': str or None,
+            'user_already_uploaded': bool,
+            'sections_count': int,
+            'action': 'allow' | 'reject' | 'warn'
+        }
+    """
+    # Generate fingerprint
+    fingerprint = generate_audio_fingerprint(audio_path)
+    
+    # Search database
+    matches = db.query("""
+        SELECT song_id, source_song_id, user_id, section_label
+        FROM songs 
+        WHERE audio_fingerprint = %s
+        ORDER BY upload_date DESC
+    """, [fingerprint])
+    
+    if not matches:
+        return {'is_duplicate': False, 'action': 'allow'}
+    
+    # Check user tier and existing sections
+    source_song_id = matches[0]['source_song_id']
+    user_sections = [m for m in matches if m['user_id'] == user_id]
+    
+    if user_tier == 'free' and len(user_sections) > 0:
+        return {
+            'is_duplicate': True,
+            'source_song_id': source_song_id,
+            'user_already_uploaded': True,
+            'sections_count': len(user_sections),
+            'action': 'reject',
+            'message': 'You already analyzed a section from this song. Try a different song!'
+        }
+    
+    if len(matches) >= 5:  # Max 5 sections per song globally
+        return {
+            'is_duplicate': True,
+            'action': 'warn',
+            'message': 'This song is well-covered! Try analyzing something new.'
+        }
+    
+    return {
+        'is_duplicate': True,
+        'source_song_id': source_song_id,
+        'action': 'allow'
+    }
+```
+
+### Level 2: File Hash
+- Calculate MD5 hash of uploaded file
+- Check `file_hash` column for exact matches
+- Faster than audio fingerprinting for exact duplicates
+
+### Level 3: Metadata Matching
+- Compare tempo + key + duration
+- Secondary verification for edge cases
+- Lower confidence than fingerprinting
+
+## Similarity Search Implementation (NEW - Phase 7)
+
+### Small Scale (< 10K patterns)
+Use PostgreSQL with cosine similarity:
+```python
+from scipy.spatial.distance import cosine
+
+def search_similar_patterns(pattern_id: str, limit: int = 20) -> list:
+    """Search similar patterns using cosine similarity."""
+    # Get query pattern
+    query = db.query("SELECT fingerprint FROM patterns WHERE pattern_id = %s", [pattern_id])
+    query_vector = np.frombuffer(query[0]['fingerprint'], dtype=np.float64)
+    
+    # Get all candidate patterns
+    candidates = db.query("SELECT pattern_id, fingerprint FROM patterns WHERE pattern_id != %s", [pattern_id])
+    
+    # Calculate similarities
+    similarities = []
+    for candidate in candidates:
+        candidate_vector = np.frombuffer(candidate['fingerprint'], dtype=np.float64)
+        similarity = 1 - cosine(query_vector, candidate_vector)
+        if similarity >= 0.7:  # Threshold
+            similarities.append({
+                'pattern_id': candidate['pattern_id'],
+                'similarity': float(similarity)
+            })
+    
+    # Sort and limit
+    similarities.sort(key=lambda x: x['similarity'], reverse=True)
+    return similarities[:limit]
+```
+
+### Large Scale (> 100K patterns)
+Use FAISS for approximate nearest neighbor:
+```python
+import faiss
+
+def build_faiss_index(instrument_type: str):
+    """Build FAISS index for fast similarity search."""
+    # Get all patterns
+    patterns = db.query("SELECT pattern_id, fingerprint FROM patterns WHERE instrument_type = %s", [instrument_type])
+    
+    # Convert to matrix
+    fingerprints = np.array([
+        np.frombuffer(p['fingerprint'], dtype=np.float64) 
+        for p in patterns
+    ])
+    
+    # Build index
+    dimension = fingerprints.shape[1]
+    index = faiss.IndexFlatL2(dimension)
+    index.add(fingerprints)
+    
+    return index, [p['pattern_id'] for p in patterns]
+
+def search_with_faiss(query_vector: np.ndarray, index, pattern_ids, k=20):
+    """Search using FAISS index."""
+    distances, indices = index.search(query_vector.reshape(1, -1), k)
+    results = []
+    for i, idx in enumerate(indices[0]):
+        results.append({
+            'pattern_id': pattern_ids[idx],
+            'similarity': 1 - distances[0][i]  # Convert L2 to similarity
+        })
+    return results
+```
 
 ## API Design Rules
 
@@ -100,34 +431,116 @@ This is a music analysis web application that helps producers deconstruct songs 
     "message": "Optional message"
   }
   ```
-- Include proper HTTP status codes (200, 400, 500)
+- Include proper HTTP status codes (200, 400, 403, 500)
 - Add request validation using DRF serializers
+
+### New Endpoints (Phase 7)
+```python
+# POST /api/search/similar
+{
+  "song_id": "uuid",
+  "instrument": "drums",
+  "min_similarity": 0.7,
+  "limit": 20,
+  "filters": {
+    "tempo_range": [80, 140],
+    "genre": ["hip-hop", "trap"]
+  }
+}
+
+# Response structure
+{
+  "status": "success",
+  "total_matches": 47,
+  "results": [
+    {
+      "source_song_id": "uuid",
+      "sections": [
+        {
+          "song_id": "uuid",
+          "section": "chorus",
+          "similarity_score": 0.94,
+          "tempo": 128,
+          "key": "C minor",
+          "preview_url": "/api/preview/uuid",
+          "midi_available": true  // Based on user tier
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Tier-Based Access Control (NEW - Phase 3)
+```python
+from rest_framework.permissions import BasePermission
+
+class TierBasedPermission(BasePermission):
+    """Control access based on user subscription tier."""
+    
+    def has_permission(self, request, view):
+        user_tier = request.user.subscription_tier  # free/starter/producer/studio
+        
+        # Check upload limits
+        if view.action == 'analyze':
+            monthly_uploads = get_monthly_upload_count(request.user.id)
+            limits = {'free': 3, 'starter': 25, 'producer': -1, 'studio': -1}
+            
+            if monthly_uploads >= limits[user_tier] and limits[user_tier] != -1:
+                return False
+        
+        # Check similarity search access
+        if view.action == 'search_similar':
+            if user_tier == 'free':
+                return False  # Free tier can only preview
+        
+        return True
+```
 
 ### Error Handling
 - Catch all exceptions in API views
 - Return user-friendly error messages
 - Log detailed errors server-side for debugging
 - Never expose internal paths or stack traces to users
+- Special errors for duplicate detection:
+  - 400: "You already analyzed this song"
+  - 429: "Monthly upload limit reached"
 
 ## Performance Guidelines
 
 ### Backend Optimization
 - Processing should complete in under 30 seconds for MVP
-- Use `hop_length` parameter in librosa to balance speed vs accuracy
-- Cache processed results using file hash as key (post-MVP)
-- Consider adding progress updates for long-running processes
+- Use Celery for async processing (Phase 2)
+- Pre-compute pattern similarities in background (Phase 7)
+- Use FAISS for similarity search at scale (>100K patterns)
+- Cache processed results using file hash as key
+- Delete audio files immediately after pattern extraction
+- Use database connection pooling
 
 ### Frontend Optimization
 - Lazy load components not needed on initial render
 - Show loading states immediately when user clicks "Analyze"
 - Display progress indicators during processing
 - Optimize waveform rendering for large files
+- Paginate similarity search results
+- Use virtual scrolling for large result lists
+
+### Scaling Considerations
+- **< 10K patterns**: PostgreSQL real-time similarity search
+- **10K-100K patterns**: Pre-computed similarities (background jobs)
+- **> 100K patterns**: FAISS approximate nearest neighbor
+- Monitor database size and query performance
+- Plan for sharding if database exceeds 1TB
 
 ## Testing Requirements
 
 ### What to Test
 - Audio processing functions with sample files
+- Pattern fingerprinting consistency (same song = same fingerprint)
+- Duplicate detection accuracy (known duplicates vs unique songs)
+- Similarity search relevance (manual validation)
 - API endpoints with valid and invalid inputs
+- Tier-based access control (free vs paid features)
 - Edge cases: very short clips, silent audio, corrupted files
 - Different music genres and tempos
 
@@ -135,46 +548,100 @@ This is a music analysis web application that helps producers deconstruct songs 
 - Keep sample audio files in `backend/storage/test_samples/`
 - Include variety: rock, hip-hop, electronic, jazz, classical
 - Test with both high-quality and compressed audio
+- Create test cases for duplicate detection:
+  - Same song, different sections
+  - Same song, different quality
+  - Different songs, similar patterns
+
+### Pattern Fingerprinting Tests (NEW)
+```python
+def test_fingerprint_consistency():
+    """Same audio should produce identical fingerprints."""
+    audio_path = 'test_samples/drum_loop.wav'
+    
+    fp1 = create_drum_fingerprint(extract_pattern(audio_path))
+    fp2 = create_drum_fingerprint(extract_pattern(audio_path))
+    
+    assert np.allclose(fp1, fp2), "Fingerprints not consistent"
+
+def test_fingerprint_similarity():
+    """Similar patterns should have high similarity scores."""
+    pattern1 = extract_pattern('test_samples/boom_bap_1.wav')
+    pattern2 = extract_pattern('test_samples/boom_bap_2.wav')
+    
+    fp1 = create_drum_fingerprint(pattern1)
+    fp2 = create_drum_fingerprint(pattern2)
+    
+    similarity = 1 - cosine(fp1, fp2)
+    assert similarity > 0.7, f"Expected >0.7, got {similarity}"
+```
 
 ## UI/UX Guidelines
 
 ### User Experience
 - Show clear feedback for every user action
-- Display helpful error messages (e.g., "Audio file too large. Please upload files under 50MB")
-- Add tooltips for technical terms (MIDI, onset, stem)
+- Display helpful error messages:
+  - "Audio file too large. Please upload files under 50MB"
+  - "You already analyzed this song. Try a different one!"
+  - "Upgrade to Producer tier to download MIDI"
+- Add tooltips for technical terms (MIDI, onset, stem, fingerprint)
 - Make the snippet selection intuitive with visual feedback
+- Show similarity scores prominently (e.g., "94% match")
+- Group similar patterns by source song
 
 ### Design Consistency
 - Use Tailwind utility classes (avoid custom CSS unless necessary)
 - Maintain consistent spacing and colors throughout
 - Make interactive elements obviously clickable (hover states, cursor changes)
 - Ensure mobile responsiveness even though desktop is primary target
+- Use loading skeletons instead of blank states
 
-## Security Rules
+### Tier Indicators (NEW)
+- Show user's current tier prominently
+- Display feature locks with clear upgrade prompts
+- Use icons/badges to indicate premium features
+- Show remaining uploads for limited tiers
+
+## Security & Privacy Rules
 
 ### Input Validation
 - Validate all file uploads (type, size, content)
 - Sanitize filename inputs
-- Rate limit API endpoints (post-MVP: 10 requests per minute per user)
+- Rate limit API endpoints:
+  - Free tier: 10 requests per hour
+  - Paid tiers: 100 requests per hour
 - Use CORS properly to restrict frontend origins
 
-### Data Privacy
-- Don't store user audio files permanently
-- Auto-delete uploads after processing completes
-- No user authentication required for MVP (add later)
-- Don't log sensitive information
+### Data Privacy & Legal Compliance
+- **Delete audio files immediately after processing**
+- Store only pattern fingerprints, MIDI data, and metadata
+- Do not store or redistribute copyrighted audio
+- Free tier: patterns are public (anonymized)
+- Paid tier: private patterns option available
+- No personal data linked to patterns in search results
+- GDPR/CCPA compliant data handling
+- Terms of Service: users warrant they have rights to uploaded audio
+
+### Copyright Protection
+- Analyzing patterns = fair use (transformative)
+- Not storing copyrighted audio long-term
+- Only storing mathematical representations
+- Similar to Shazam's audio fingerprints
 
 ## Git Workflow
 
 ### Commits
 - Make small, focused commits
-- Use descriptive commit messages: "Add drum onset detection" not "Update file"
+- Use descriptive commit messages:
+  - "feat: add audio fingerprinting for duplicate detection"
+  - "fix: improve drum classification accuracy"
+  - "refactor: optimize pattern fingerprinting algorithm"
 - Commit working code (don't break the build)
 - Test before committing
 
 ### Branches
 - `main` branch is for stable code only
-- Work in feature branches: `feature/onset-detection`
+- Work in feature branches: `feature/pattern-fingerprinting`
 - Merge to main after testing
 
 ## Development Workflow
@@ -184,78 +651,157 @@ This is a music analysis web application that helps producers deconstruct songs 
 - Test each feature thoroughly before moving to next
 - Don't optimize prematurely (get it working first, then make it fast)
 - Keep the app in a runnable state as much as possible
+- Follow the phase sequence in README.md
+
+### Current Phase Focus
+**Phase 2 (Weeks 2-3)**: Audio Processing Backend
+- Install Spleeter, librosa, Chromaprint
+- Implement stem separation
+- Add audio fingerprinting for duplicates
+- Test with diverse audio samples
+
+**Future Phases:**
+- Phase 3: Database & pattern storage
+- Phase 7: Pattern similarity search (the moat!)
 
 ### When Stuck
-- Check documentation first (Spleeter, librosa, DRF)
+- Check documentation first (Spleeter, librosa, Chromaprint, FAISS)
 - Test with simpler inputs (shorter clips, cleaner audio)
 - Add print/console.log statements to debug
 - Ask for help with specific error messages, not vague issues
+- Reference README.md for architecture decisions
 
 ## Common Pitfalls to Avoid
 
 ### Backend
-- Don't use synchronous processing for long tasks (add Celery later)
+- Don't use synchronous processing for long tasks (use Celery)
 - Don't forget to close file handles after reading
 - Don't hardcode file paths (use Django settings)
 - Don't return raw errors to frontend (sanitize first)
+- Don't store audio files permanently (delete after processing)
+- Don't recompute fingerprints (cache by file hash)
 
 ### Frontend
 - Don't mutate state directly (use setState or hooks properly)
 - Don't make API calls in render methods
 - Don't forget to handle loading and error states
 - Don't hardcode API URLs (use environment variables)
+- Don't show locked features without upgrade prompts
 
 ### Audio Processing
 - Don't assume all audio files are clean (handle noise)
 - Don't skip normalization (audio levels vary widely)
 - Don't process entire songs (stick to snippets)
-- Don't trust onset detection 100% (it will have false positives/negatives)
+- Don't trust onset detection 100% (will have false positives/negatives)
+- Don't recalculate fingerprints (expensive operation)
+
+### Pattern Fingerprinting (NEW)
+- Don't change fingerprint dimensions after launch (breaks existing data)
+- Don't normalize vectors before storage (store raw features)
+- Don't use floating point comparison for equality (use np.allclose)
+- Don't forget to handle edge cases (silent audio, single note, etc.)
+
+### Database (NEW)
+- Don't query all patterns for similarity search (use indexes/FAISS)
+- Don't store audio files in database (use temp storage only)
+- Don't forget to clean up orphaned patterns
+- Don't exceed connection pool limits
 
 ## MVP Scope Boundaries
 
-### What's In Scope
+### What's In Scope (Phases 1-6)
 - Upload audio file
-- Select 15-30 second snippet
+- Select 15-90 second snippet (tier-based)
 - Analyze drums only
 - Display visual MIDI pattern
+- Duplicate detection (1 section per song for free tier)
+- Pattern storage with fingerprints
 - Basic error handling
+- Tier-based access control
+
+### What's Coming Soon (Phases 7-9)
+- Pattern similarity search
+- Pattern discovery UI
+- Audio previews
+- MIDI download for similar patterns
+- Genre filtering and trends
 
 ### What's Out of Scope (For Now)
-- User accounts and authentication
-- Saving/sharing analyses
-- MIDI file export
-- Other instruments (bass, melody, chords)
-- Real-time processing
+- Pattern manipulation/editing (Phase 11)
+- Full stem separation (Phase 11)
+- Other instruments (bass: Phase 10, chords: Phase 10)
+- User accounts and authentication (Phase 3)
+- Community features (Phase 12)
 - Mobile app version
-- Collaborative features
+- DAW plugins (Phase 13)
+
+## Database Health Monitoring (NEW - Phase 7+)
+
+Track these metrics:
+- Unique source songs vs total uploads
+- Genre distribution (incentivize diversity)
+- Duplicate detection accuracy
+- Pattern quality scores
+- Average sections per source song
+- User contribution patterns
+- Similarity search query performance
+
+Alert if:
+- Duplicate rate > 30%
+- Single genre > 50% of database
+- Query time > 2 seconds
+- Storage exceeds 100GB
 
 ## When to Ask for Help
 
 ### Good Questions
 - "How do I improve onset detection accuracy for electronic music?"
 - "What's the best way to visualize this MIDI data with Canvas?"
-- "How should I structure this API endpoint to handle large files?"
+- "How should I structure the pattern fingerprint for optimal similarity search?"
+- "Should I use cosine similarity or euclidean distance for pattern matching?"
+- "How do I optimize FAISS index for our use case?"
 
 ### Questions to Avoid
 - "Make it work" (be specific about what's not working)
 - "Fix my code" (explain what you've tried and what error you're getting)
+- "Build the similarity search" (break into smaller tasks)
 
 ## Success Criteria
 
-### MVP is Complete When
+### Phase 2 Complete When
+- Spleeter successfully separates stems
+- Audio fingerprinting detects duplicates accurately
+- Duplicate detection workflow works end-to-end
+- Processing completes in < 30 seconds
+
+### MVP Complete When (Phase 6)
 - User can upload audio and get drum pattern visualization
-- Processing takes under 30 seconds per snippet
+- Duplicate detection prevents spam (1 section per song for free)
+- Tier-based limits enforced correctly
+- Pattern fingerprints stored in database
 - Works with at least 3 different music genres
 - UI is intuitive without needing instructions
 - No critical bugs in core functionality
 
+### Pattern Discovery Ready When (Phase 9)
+- 2,000+ patterns in database
+- Similarity search returns relevant results
+- Search completes in < 2 seconds
+- Tier-based access control works
+- 50+ paying users
+- User feedback validates pattern discovery value
+
 ## Additional Notes
 
 - Prioritize functionality over perfection for MVP
+- Pattern database is our competitive moat - implement carefully
 - User feedback will guide future development
 - Document decisions and technical debt as you go
 - Keep README.md updated with latest status
+- Reference README.md for detailed architecture decisions
 
 ---
 
-Remember: We're building a minimum viable product to validate the concept. Focus on core functionality first, polish later. Get it working, get feedback, iterate.
+Remember: We're building a minimum viable product to validate the concept, then adding the pattern database for network effects. Focus on core functionality first (Phases 1-6), then pattern discovery (Phases 7-9), then polish and scale. Get it working, get feedback, iterate.
+
+**Current Priority**: Phase 2 - Audio processing with duplicate detection
