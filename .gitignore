@@ -66,3 +66,21 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+# Pretrained models (too large for git)
+backend/pretrained_models/
+*.data-00000-of-00001
+*.meta
+*.index
+*.pb
+*.h5
+
+# Audio files
+backend/storage/test_samples/*.wav
+backend/storage/test_samples/*.mp3
+backend/storage/uploads/*
+backend/storage/processed/*
+
+# Keep folder structure
+!backend/storage/test_samples/.gitkeep
+!backend/storage/uploads/.gitkeep
+!backend/storage/processed/.gitkeep
