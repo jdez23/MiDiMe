@@ -23,32 +23,40 @@ We're not just analyzing songs - we're building the world's largest musical patt
 
 **Phase**: MVP Development - Drum Pattern Analysis + Database Foundation
 **Target Launch**: 12 weeks from project start
-**Current Focus**: Phase 2 - Audio Processing Backend
+**Current Focus**: Phase 5 - Drum Detection & MIDI
 
-### Recent Progress (October 13, 2025)
+### Recent Progress (November 3, 2025)
+
 ✅ **Phase 1 COMPLETE - Full Stack File Upload Working!**
-
-**Django Backend:**
-- Django 4.2.7 with Django REST Framework configured
-- `/api/upload` endpoint with file validation (MP3, WAV, FLAC, M4A, OGG)
-- `/api/health` endpoint for health checks
-- CORS configured for React frontend
-- File size validation (max 50MB)
-- Server running at `http://localhost:8000`
-
-**React Frontend:**
+- Django 4.2.7 with Django REST Framework
 - React 19.2.0 with Tailwind CSS 3.3.0
-- Beautiful drag-and-drop file upload UI
-- Real-time upload progress tracking
-- Client-side and server-side validation
-- Error handling with clear messages
-- Server running at `http://localhost:3000`
+- File upload endpoint with drag-and-drop UI
+- Full validation and error handling
 
-📋 **Next Up (Phase 2):**
-- Install and configure Spleeter for stem separation
-- Implement audio trimming functionality
-- Add librosa for onset detection
-- Add Chromaprint for audio fingerprinting (duplicate detection)
+✅ **Phase 2 PARTIAL - Audio Processing Backend**
+- ✅ Spleeter 2.4.2 installed (4-stem separation: drums/bass/vocals/other)
+- ✅ FFmpeg 8.0 for audio codec support
+- ✅ Audio trimming with pydub (15-90 second validation)
+- ✅ Integrated audio service (trim → separate → process)
+- ⏳ Chromaprint fingerprinting (pending)
+- ⏳ Celery async processing (pending)
+
+✅ **Phase 5 PARTIAL - Drum Detection & MIDI**
+- ✅ Onset detection with librosa 0.11.0
+- ✅ Frequency-based drum classification (kick/snare/hihat)
+- ✅ MIDI conversion with MIDIUtil 1.2.1
+- ✅ Fixed onset detection parameters:
+  - Changed `backtrack=False` for better kick detection
+  - Changed `filter_weak=False` to capture all hits
+  - Lowered `min_strength=0.1` for better sensitivity
+- ✅ Test results: 18 kicks, 4 snares, 15 hi-hats per 15s @ 167 BPM
+- ⚠️ MIDI timing alignment verification in progress
+
+📋 **Next Up:**
+- Verify MIDI timing alignment with audio
+- Create integrated `/api/analyze` endpoint
+- Implement database schema (songs, patterns tables)
+- Add pattern fingerprinting for similarity search
 
 ---
 
@@ -439,13 +447,13 @@ Health check endpoint.
 - [x] Test full file transfer flow frontend-to-backend
 - [x] Add validation and error handling
 
-### Phase 2: Audio Processing Backend (Week 2-3)
-- [ ] Install and configure Spleeter
-- [ ] Implement audio trimming with pydub
-- [ ] Create stem separation service
+### Phase 2: Audio Processing Backend (Week 2-3) ⚠️ PARTIAL
+- [x] Install and configure Spleeter
+- [x] Implement audio trimming with pydub
+- [x] Create stem separation service
+- [x] Test with sample audio files
 - [ ] Add Chromaprint for audio fingerprinting
 - [ ] Implement duplicate detection logic
-- [ ] Test with sample audio files
 - [ ] Set up Celery for async processing
 
 ### Phase 3: Database & Pattern Storage (Week 3-4)
@@ -463,11 +471,14 @@ Health check endpoint.
 - [ ] Connect UI to API
 - [ ] Add duplicate detection feedback
 
-### Phase 5: Drum Detection & MIDI (Week 5-6)
-- [ ] Implement onset detection
-- [ ] Add drum classification logic
-- [ ] Convert to MIDI format
-- [ ] Fine-tune accuracy
+### Phase 5: Drum Detection & MIDI (Week 5-6) ⚠️ PARTIAL
+- [x] Implement onset detection with librosa
+- [x] Add drum classification logic (kick/snare/hihat)
+- [x] Convert to MIDI format with MIDIUtil
+- [x] Debug and fix onset detection parameters (backtrack, filter_weak)
+- [ ] Verify MIDI timing alignment with audio
+- [ ] Fine-tune accuracy with diverse samples
+- [ ] Create integrated API endpoint
 - [ ] Save patterns to database
 
 ### Phase 6: Visualization (Week 7)

@@ -4,9 +4,10 @@ django-cors-headers==4.3.1
 Pillow==10.1.0
 python-magic==0.4.27
 
-# Audio Processing (Phase 2)
+# Audio Processing (Phase 2 & 5)
 spleeter==2.4.0
 librosa==0.10.1
 pydub==0.25.1
 numpy==1.24.3
 scipy==1.11.4
+MIDIUtil==1.2.1
