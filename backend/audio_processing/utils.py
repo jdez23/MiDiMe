@@ -52,15 +52,14 @@ def trim_audio(
     
     duration_seconds = end_time_seconds - start_time_seconds
     
-    # Validate duration (15-90 seconds for MiDiMe)
-    if duration_seconds < 15:
+    if duration_seconds < 1:
         raise ValueError(
-            f"Duration too short: {duration_seconds:.1f}s. Minimum is 15 seconds."
+            f"Duration too short: {duration_seconds:.1f}s. Minimum is 1 second."
         )
-    
-    if duration_seconds > 90:
+
+    if duration_seconds > 300:
         raise ValueError(
-            f"Duration too long: {duration_seconds:.1f}s. Maximum is 90 seconds."
+            f"Duration too long: {duration_seconds:.1f}s. Maximum is 5 minutes."
         )
     
     try:

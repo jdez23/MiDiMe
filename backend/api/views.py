@@ -6,245 +6,206 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from .serializers import FileUploadSerializer, AudioAnalyzeSerializer
-from audio_processing.audio_service import process_audio_snippet
-from audio_processing.onset_detector import analyze_drum_pattern
-from audio_processing.drum_classifier import classify_drum_pattern
-from audio_processing.midi_converter import convert_pattern_to_json
 
 logger = logging.getLogger(__name__)
 
 
 class FileUploadView(APIView):
     """
-    API endpoint for uploading audio files.
-    
     POST /api/upload
     Accepts an audio file and returns filename and file size.
     """
-    
+
     def post(self, request):
-        """
-        Handle file upload.
-        
-        Args:
-            request: HTTP request containing the audio file
-            
-        Returns:
-            JSON response with file information or error message
-        """
         serializer = FileUploadSerializer(data=request.data)
-        
+
         if serializer.is_valid():
             try:
                 audio_file = serializer.validated_data['audio_file']
-                
-                # Save file to uploads directory
+
                 upload_dir = os.path.join(settings.MEDIA_ROOT, 'uploads')
                 os.makedirs(upload_dir, exist_ok=True)
-                
                 file_path = os.path.join(upload_dir, audio_file.name)
-                
-                # Write file to disk
-                with open(file_path, 'wb+') as destination:
+
+                with open(file_path, 'wb+') as dest:
                     for chunk in audio_file.chunks():
-                        destination.write(chunk)
-                
-                # Get file size in MB
+                        dest.write(chunk)
+
                 file_size_mb = audio_file.size / (1024 * 1024)
-                
+
                 return Response({
                     'status': 'success',
                     'message': 'File uploaded successfully',
                     'data': {
                         'filename': audio_file.name,
                         'file_size': f"{file_size_mb:.2f} MB",
-                        'file_size_bytes': audio_file.size
+                        'file_size_bytes': audio_file.size,
                     }
                 }, status=status.HTTP_200_OK)
-                
-            except Exception as e:
+
+            except Exception as exc:
                 return Response({
                     'status': 'error',
-                    'message': f'Error saving file: {str(e)}'
+                    'message': f'Error saving file: {exc}'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
+
         return Response({
             'status': 'error',
             'message': 'Invalid file',
-            'errors': serializer.errors
+            'errors': serializer.errors,
         }, status=status.HTTP_400_BAD_REQUEST)
 
 
 class HealthCheckView(APIView):
     """
-    Health check endpoint.
-
     GET /api/health
     Returns the health status of the API.
     """
 
     def get(self, request):
-        """Return health status."""
         from datetime import datetime
         return Response({
             'status': 'healthy',
-            'timestamp': datetime.now().isoformat() + 'Z'
+            'timestamp': datetime.now().isoformat() + 'Z',
         }, status=status.HTTP_200_OK)
 
 
 class AudioAnalyzeView(APIView):
     """
-    API endpoint for analyzing audio snippets and extracting musical patterns.
-
     POST /api/analyze
-    Accepts an audio file, time range, and instrument type.
-    Returns MIDI pattern data with onset timings.
+    Accepts an audio file (and optional grid params), runs drum analysis,
+    and returns a quantised grid pattern matching the frontend format.
     """
 
     def post(self, request):
-        """
-        Analyze an audio snippet and return pattern data.
-
-        Args:
-            request: HTTP request containing:
-                - audio_file: Audio file (MP3, WAV, FLAC, M4A, OGG)
-                - start_time: Start time in seconds
-                - end_time: End time in seconds
-                - instrument: Instrument type (drums, bass, chords, melody)
-
-        Returns:
-            JSON response with MIDI pattern data or error message
-        """
         serializer = AudioAnalyzeSerializer(data=request.data)
 
         if not serializer.is_valid():
             return Response({
                 'status': 'error',
                 'message': 'Invalid request data',
-                'errors': serializer.errors
+                'errors': serializer.errors,
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Extract validated data
         audio_file = serializer.validated_data['audio_file']
-        start_time = serializer.validated_data['start_time']
-        end_time = serializer.validated_data['end_time']
-        instrument = serializer.validated_data['instrument']
+        grid_size = serializer.validated_data['grid_size']
+        bar_count = serializer.validated_data['bar_count']
+        start_time = serializer.validated_data.get('start_time')
+        end_time = serializer.validated_data.get('end_time')
 
-        # Generate unique ID for this analysis
         analysis_id = str(uuid.uuid4())
-
-        # Setup paths
         upload_dir = os.path.join(settings.MEDIA_ROOT, 'uploads')
         processed_dir = os.path.join(settings.MEDIA_ROOT, 'processed')
         os.makedirs(upload_dir, exist_ok=True)
         os.makedirs(processed_dir, exist_ok=True)
 
-        # Save uploaded file temporarily
         file_path = os.path.join(upload_dir, f"{analysis_id}_{audio_file.name}")
 
         try:
-            # Write uploaded file to disk
-            with open(file_path, 'wb+') as destination:
+            with open(file_path, 'wb+') as dest:
                 for chunk in audio_file.chunks():
-                    destination.write(chunk)
+                    dest.write(chunk)
 
-            logger.info(f"Starting analysis {analysis_id}: {instrument} from {start_time}s to {end_time}s")
+            logger.info(f"Analysis {analysis_id}: grid={grid_size}, bars={bar_count}")
 
-            # Currently only drums are fully implemented
-            if instrument != 'drums':
-                return Response({
-                    'status': 'error',
-                    'message': f'{instrument.capitalize()} analysis not yet implemented. Only drums are supported in MVP.'
-                }, status=status.HTTP_501_NOT_IMPLEMENTED)
+            # Optional trimming
+            audio_to_analyze = file_path
+            if start_time is not None and end_time is not None:
+                audio_to_analyze = self._trim(file_path, start_time, end_time, processed_dir)
 
-            # Step 1: Process audio snippet (trim + stem separation)
-            result = process_audio_snippet(
-                audio_path=file_path,
-                start_time_seconds=start_time,
-                end_time_seconds=end_time,
-                output_base_dir=processed_dir,
-                extract_stems=True,
-                cleanup_after=True
-            )
+            # Drum onset classification — try Demucs, fall back to band filtering
+            drum_onsets, method = self._classify_drums(audio_to_analyze, processed_dir)
 
-            if not result.success:
-                return Response({
-                    'status': 'error',
-                    'message': 'Audio processing failed',
-                    'error': result.error
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-            # Get drum stem path
-            drum_stem_path = result.stem_paths.get('drums')
-
-            if not drum_stem_path or not os.path.exists(drum_stem_path):
-                return Response({
-                    'status': 'error',
-                    'message': 'Failed to extract drum stem'
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-            logger.info(f"Drum stem extracted: {drum_stem_path}")
-
-            # Step 2: Analyze drum pattern (onset detection)
-            pattern_analysis = analyze_drum_pattern(drum_stem_path)
-            onset_times = pattern_analysis['onset_times']
-            tempo = pattern_analysis['tempo_bpm']
-
-            logger.info(f"Detected {len(onset_times)} onsets at {tempo:.1f} BPM")
-
-            # Step 3: Classify drums (kick/snare/hihat)
-            drum_pattern = classify_drum_pattern(drum_stem_path, onset_times)
+            # Tempo estimation
+            tempo = self._get_tempo(audio_to_analyze)
 
             logger.info(
-                f"Classification: {len(drum_pattern['kick'])} kicks, "
-                f"{len(drum_pattern['snare'])} snares, "
-                f"{len(drum_pattern['hihat'])} hi-hats"
+                f"  method={method}, tempo={tempo:.1f}, "
+                f"kicks={len(drum_onsets['kick'])}, "
+                f"snares={len(drum_onsets['snare'])}, "
+                f"hihats={len(drum_onsets['hihat'])}"
             )
 
-            # Step 4: Convert to JSON format for frontend
-            midi_json = convert_pattern_to_json(drum_pattern, tempo)
+            # Quantise to grid (produces the shape DrumDissect expects)
+            from audio_processing.quantizer import build_pattern_response
+            pattern = build_pattern_response(drum_onsets, tempo, grid_size, bar_count)
 
-            # Step 5: Cleanup temporary files
-            try:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-                if os.path.exists(drum_stem_path):
-                    os.remove(drum_stem_path)
-                # Cleanup parent directory if empty
-                stem_parent_dir = os.path.dirname(drum_stem_path)
-                if os.path.exists(stem_parent_dir) and not os.listdir(stem_parent_dir):
-                    os.rmdir(stem_parent_dir)
-            except OSError as e:
-                logger.warning(f"Cleanup warning: {e}")
-
-            # Build response
             return Response({
                 'status': 'success',
                 'analysis_id': analysis_id,
-                'instrument': instrument,
-                'duration': end_time - start_time,
-                'midi_data': midi_json['midi_data'],
-                'tempo': midi_json['tempo'],
-                'time_signature': midi_json['time_signature'],
-                'metadata': {
-                    **midi_json['metadata'],
-                    'snippet_duration_seconds': result.metadata.get('snippet_duration_seconds'),
-                    'sample_rate': result.metadata.get('sample_rate'),
-                    'hit_density': pattern_analysis['hit_density']
-                }
+                'method': method,
+                'pattern': pattern,
             }, status=status.HTTP_200_OK)
 
-        except Exception as e:
-            logger.error(f"Analysis failed: {str(e)}", exc_info=True)
-
-            # Cleanup on error
-            try:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-            except OSError:
-                pass
-
+        except Exception as exc:
+            logger.error(f"Analysis failed: {exc}", exc_info=True)
             return Response({
                 'status': 'error',
-                'message': f'Analysis failed: {str(e)}'
+                'message': f'Analysis failed: {exc}',
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        finally:
+            self._cleanup(file_path, processed_dir)
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _trim(file_path: str, start: float, end: float, out_dir: str) -> str:
+        from audio_processing.utils import trim_audio
+
+        trimmed_path = os.path.join(out_dir, f"trimmed_{os.path.basename(file_path)}.wav")
+        trim_audio(file_path, trimmed_path, start, end)
+        return trimmed_path
+
+    @staticmethod
+    def _classify_drums(audio_path: str, processed_dir: str):
+        """
+        Try Demucs stem separation + onset/classification pipeline.
+        On ImportError fall back to frequency-band analysis.
+        """
+        try:
+            from audio_processing.stem_separator import separate_stems
+            from audio_processing.onset_detector import analyze_drum_pattern
+            from audio_processing.drum_classifier import classify_drum_pattern
+
+            stems_dir = os.path.join(processed_dir, "stems")
+            stem_paths = separate_stems(audio_path, stems_dir)
+            drum_stem = stem_paths.get("drums")
+
+            if not drum_stem or not os.path.exists(drum_stem):
+                raise RuntimeError("Drum stem not produced")
+
+            analysis = analyze_drum_pattern(drum_stem)
+            onset_times = analysis["onset_times"]
+            drum_pattern = classify_drum_pattern(drum_stem, onset_times)
+            return drum_pattern, "demucs"
+
+        except (ImportError, RuntimeError) as exc:
+            logger.warning(f"Demucs unavailable ({exc}), using band-analyzer fallback")
+            from audio_processing.band_analyzer import analyze_by_frequency_bands
+            return analyze_by_frequency_bands(audio_path), "band_filter"
+
+    @staticmethod
+    def _get_tempo(audio_path: str) -> float:
+        try:
+            from audio_processing.band_analyzer import get_tempo_from_audio
+            return get_tempo_from_audio(audio_path)
+        except Exception:
+            return 120.0
+
+    @staticmethod
+    def _cleanup(*paths):
+        import shutil
+        for p in paths:
+            try:
+                if os.path.isdir(p):
+                    for child in os.listdir(p):
+                        child_path = os.path.join(p, child)
+                        if os.path.isdir(child_path):
+                            shutil.rmtree(child_path, ignore_errors=True)
+                elif os.path.isfile(p):
+                    os.remove(p)
+            except OSError:
+                pass

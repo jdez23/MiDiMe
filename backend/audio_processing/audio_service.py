@@ -143,8 +143,6 @@ def process_audio_snippet(
                 stem_paths = separate_stems(
                     trimmed_path,
                     stems_dir,
-                    model="spleeter:4stems",
-                    codec="wav"
                 )
                 
                 logger.info(f"Successfully extracted {len(stem_paths)} stems")

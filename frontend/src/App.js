@@ -1,27 +1,43 @@
-import FileUpload from './components/FileUpload';
+import DrumDissect from './components/DrumDissect';
 
 function App() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-      <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 py-6">
-          <h1 className="text-4xl font-bold text-gray-900">
-            MiDiMe
+    <>
+      <div className="grain" aria-hidden="true" />
+      <div className="app">
+        <header className="app-header">
+          <h1 className="app-title app-title--midimi">
+            <span className="title-word">
+              <span className="glow-letter" data-char="M">
+                M
+              </span>
+              <span className="glow-letter" data-char="i">
+                i
+              </span>
+              <span className="glow-letter" data-char="D">
+                D
+              </span>
+              <span className="glow-letter" data-char="i">
+                i
+              </span>
+              <span className="glow-letter" data-char="M">
+                M
+              </span>
+              <span className="glow-letter" data-char="i">
+                i
+              </span>
+            </span>
           </h1>
-          <p className="text-gray-600 mt-2">
-            Music Pattern Analyzer - Upload your audio files
-          </p>
-        </div>
-      </header>
+          <div className="subtitle">pattern visualizer</div>
+        </header>
 
-      <main className="py-12">
-        <FileUpload />
-      </main>
+        <main>
+          <DrumDissect />
+        </main>
 
-      <footer className="text-center py-8 text-gray-600">
-        <p>Phase 1: Foundation Setup - File Upload Demo</p>
-      </footer>
-    </div>
+        <footer className="app-footer">MiDiMi — local analyze, MIDI export, optional API upload</footer>
+      </div>
+    </>
   );
 }
 
