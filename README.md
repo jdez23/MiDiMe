@@ -1,5 +1,11 @@
 # MiDiMe — Drum Pattern Analyzer
 
+<img width="1311" height="1187" alt="Screenshot 2026-04-04 at 2 33 19 AM" src="https://github.com/user-attachments/assets/02d86062-5cbc-4484-8d61-0d878d368624" />
+
+<img width="1311" height="1138" alt="Screenshot 2026-04-04 at 1 58 07 AM" src="https://github.com/user-attachments/assets/a42cac23-ce0b-4664-9316-c9a2ac9537dc" />
+
+<img width="1311" height="818" alt="Screenshot 2026-04-04 at 2 23 04 AM" src="https://github.com/user-attachments/assets/e33dae92-a129-4c2b-b484-2be8e47e531d" />
+
 ## Project Overview
 
 **MiDiMe** is a full-stack web application that helps music producers deconstruct drum patterns from audio. Upload any song, select a region, and the backend isolates the drum stem, detects individual hits, and returns a quantized grid-based pattern — ready to visualize, edit, and export as MIDI.
