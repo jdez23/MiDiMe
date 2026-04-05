@@ -1,10 +1,10 @@
 # MiDiMe — Drum Pattern Analyzer
 
-<img width="1311" height="1187" alt="Screenshot 2026-04-04 at 2 33 19 AM" src="https://github.com/user-attachments/assets/02d86062-5cbc-4484-8d61-0d878d368624" />
+<img width="1258" height="1273" alt="Screenshot 2026-04-04 at 7 41 25 PM" src="https://github.com/user-attachments/assets/8600c8f2-e06c-4b57-8e2a-865d65881c0b" />
 
-<img width="1311" height="1138" alt="Screenshot 2026-04-04 at 1 58 07 AM" src="https://github.com/user-attachments/assets/a42cac23-ce0b-4664-9316-c9a2ac9537dc" />
+<img width="1311" height="1138" alt="Screenshot 2026-04-04 at 1 58 07 AM" src="https://github.com/user-attachments/assets/3cd2c3d3-8fa0-4991-87dd-6c790236fab0" />
 
-<img width="1311" height="818" alt="Screenshot 2026-04-04 at 2 23 04 AM" src="https://github.com/user-attachments/assets/e33dae92-a129-4c2b-b484-2be8e47e531d" />
+<img width="1258" height="1273" alt="Screenshot 2026-04-04 at 7 41 16 PM" src="https://github.com/user-attachments/assets/f6c19804-58be-43a8-8352-834e64678b90" />
 
 ## Project Overview
 
