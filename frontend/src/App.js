@@ -23,8 +23,8 @@ function App() {
               <span className="glow-letter" data-char="M">
                 M
               </span>
-              <span className="glow-letter" data-char="i">
-                i
+              <span className="glow-letter" data-char="e">
+                e
               </span>
             </span>
           </h1>
@@ -35,7 +35,7 @@ function App() {
           <DrumDissect />
         </main>
 
-        <footer className="app-footer">MiDiMi — local analyze, MIDI export, optional API upload</footer>
+        <footer className="app-footer">MiDiMe — local analyze, MIDI export, optional API upload</footer>
       </div>
     </>
   );

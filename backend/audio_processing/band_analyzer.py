@@ -4,20 +4,24 @@ Frequency-band drum analysis fallback for MiDiMe.
 When Demucs is unavailable, this module approximates drum classification
 by bandpass-filtering the audio into kick / snare / hi-hat frequency
 ranges and running onset detection on each band independently.
+
+Audio is loaded once and reused across all three bands.
 """
 
 import logging
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-BANDS = {
+BANDS: Dict[str, Tuple[int, int]] = {
     "kick":  (40,   150),
     "snare": (150,  1500),
     "hihat": (5000, 16000),
 }
+
+_ANALYSIS_SR = 22050
 
 
 def _bandpass(y: np.ndarray, sr: int, lo: int, hi: int) -> np.ndarray:
@@ -47,14 +51,14 @@ def analyze_by_frequency_bands(
     """
     Classify drum onsets using frequency-band filtering.
 
-    Returns the same shape as the Demucs+classifier path:
-    ``{"kick": [t, ...], "snare": [t, ...], "hihat": [t, ...]}``
-    where times are in seconds.
+    Audio is loaded once at a fixed sample rate for efficiency.
+
+    Returns ``{"kick": [t, ...], "snare": [t, ...], "hihat": [t, ...]}``
     """
     import librosa
 
     logger.info(f"Band-analyzer fallback for: {audio_path}")
-    y, sr = librosa.load(audio_path, sr=None, mono=True)
+    y, sr = librosa.load(audio_path, sr=_ANALYSIS_SR, mono=True)
 
     result: Dict[str, List[float]] = {}
     for name, (lo, hi) in BANDS.items():
@@ -65,11 +69,17 @@ def analyze_by_frequency_bands(
     return result
 
 
-def get_tempo_from_audio(audio_path: str) -> float:
-    """Estimate BPM using librosa beat tracker."""
+def get_tempo_from_audio(audio_path: str, y: np.ndarray = None, sr: int = None) -> float:
+    """
+    Estimate BPM using librosa beat tracker.
+
+    If *y* and *sr* are provided, skips loading from disk.
+    """
     import librosa
 
-    y, sr = librosa.load(audio_path, sr=None, mono=True)
+    if y is None or sr is None:
+        y, sr = librosa.load(audio_path, sr=_ANALYSIS_SR, mono=True)
+
     tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
     bpm = float(np.squeeze(tempo))
     while bpm < 70:

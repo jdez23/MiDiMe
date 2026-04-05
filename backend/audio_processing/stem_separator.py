@@ -3,15 +3,43 @@ Stem separation module using Demucs v4.
 
 Separates audio files into individual stems (drums, bass, vocals, other)
 using Meta's Demucs pre-trained model (htdemucs).
+
+The model is loaded once and reused across requests (singleton pattern).
 """
 
 import os
 import logging
 import shutil
+import threading
 from typing import Dict
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+_model = None
+_model_lock = threading.Lock()
+
+
+def _get_model(model_name: str = "htdemucs", device: str = "cpu"):
+    """Load and cache the Demucs model (thread-safe singleton)."""
+    global _model
+    if _model is not None:
+        return _model
+
+    with _model_lock:
+        if _model is not None:
+            return _model
+
+        import torch
+        from demucs.pretrained import get_model
+
+        logger.info(f"Loading Demucs model '{model_name}' (one-time)…")
+        model = get_model(model_name)
+        model.to(device)
+        model.eval()
+        _model = model
+        logger.info("Demucs model loaded and cached.")
+        return _model
 
 
 def separate_stems(
@@ -23,16 +51,10 @@ def separate_stems(
     """
     Separate an audio file into 4 stems using Demucs.
 
-    Args:
-        audio_path: Path to the input audio file.
-        output_dir: Directory where separated stems will be saved.
-        model_name: Demucs model to use (default: "htdemucs").
-        device: Torch device string, e.g. "cpu" or "cuda".
+    The model is loaded once and reused across all subsequent calls.
 
     Returns:
-        Dictionary mapping stem names to file paths::
-
-            {"drums": "/.../drums.wav", "bass": "...", "vocals": "...", "other": "..."}
+        Dictionary mapping stem names to file paths.
 
     Raises:
         FileNotFoundError: If *audio_path* doesn't exist.
@@ -46,26 +68,39 @@ def separate_stems(
 
     try:
         import torch
-        from demucs.api import Separator
+        import torchaudio
+        from demucs.apply import apply_model
+        from demucs.audio import save_audio
 
-        logger.info(f"Separating stems with Demucs ({model_name}): {audio_path}")
+        model = _get_model(model_name, device)
 
-        separator = Separator(model=model_name, device=device)
-        _, separated = separator.separate_audio_file(Path(audio_path))
+        logger.info(f"Separating stems: {audio_path}")
+
+        wav, sr = torchaudio.load(str(audio_path))
+        if wav.dim() == 1:
+            wav = wav.unsqueeze(0)
+
+        ref = wav.mean(0)
+        wav = (wav - ref.mean()) / ref.std()
+        wav = wav.unsqueeze(0).to(device)
+
+        with torch.no_grad():
+            sources = apply_model(model, wav, device=device)
+
+        sources = sources * ref.std() + ref.mean()
+        sources = sources.squeeze(0)
 
         audio_stem = Path(audio_path).stem
         stem_dir = os.path.join(output_dir, audio_stem)
         os.makedirs(stem_dir, exist_ok=True)
 
-        import torchaudio
-
         stem_paths: Dict[str, str] = {}
-        for stem_name, waveform in separated.items():
+        for i, stem_name in enumerate(model.sources):
             out_path = os.path.join(stem_dir, f"{stem_name}.wav")
-            torchaudio.save(out_path, waveform.cpu(), separator.samplerate)
+            save_audio(sources[i], out_path, samplerate=model.samplerate)
             stem_paths[stem_name] = out_path
 
-        logger.info(f"Successfully separated {len(stem_paths)} stems")
+        logger.info(f"Separated {len(stem_paths)} stems")
         return stem_paths
 
     except ImportError as exc:
@@ -90,7 +125,7 @@ def cleanup_stems(stem_dir: str) -> None:
     if os.path.exists(stem_dir):
         try:
             shutil.rmtree(stem_dir)
-            logger.info(f"Cleaned up stems directory: {stem_dir}")
+            logger.info(f"Cleaned up stems: {stem_dir}")
         except OSError as exc:
             logger.error(f"Failed to cleanup stems: {exc}")
             raise

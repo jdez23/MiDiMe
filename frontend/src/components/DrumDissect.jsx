@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -50,7 +51,8 @@ function patternFromPreset(index, gridSize, barCount) {
 export default function DrumDissect() {
   const [dragOver, setDragOver] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [loadingMessage, setLoadingMessage] = useState('Analyzing pattern…');
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [loadingMessage, setLoadingMessage] = useState('');
   const [error, setError] = useState(null);
   const [audioBuffer, setAudioBuffer] = useState(null);
   const [trackName, setTrackName] = useState('—');
@@ -79,6 +81,7 @@ export default function DrumDissect() {
   const uploadedFileRef = useRef(null);
   const draggingRef = useRef(null);
   const dragOriginRef = useRef({ x: 0, rStart: 0, rEnd: 0 });
+  const abortRef = useRef(null);
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -127,11 +130,29 @@ export default function DrumDissect() {
     }
   }, [hydrated, currentPattern, gridSize, barCount, activePresetIndex]);
 
+  const LOADING_CELLS = useMemo(
+    () =>
+      Array.from({ length: 96 }, (_, i) => ({
+        type: ['kick', 'snare', 'hihat'][Math.floor(i / 32)],
+        threshold: Math.random() * 90 + 5,
+        delay: Math.random() * 600,
+      })),
+    []
+  );
+
   // --- Explicit analysis: only runs when user clicks "Analyze Selection" ---
   const analyzeSelection = useCallback(async () => {
     if (!uploadedFileRef.current) return;
+
+    if (abortRef.current) {
+      abortRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setLoading(true);
-    setLoadingMessage('Analyzing on server…');
+    setLoadingProgress(0);
+    setLoadingMessage('Preparing…');
     setError(null);
 
     try {
@@ -140,14 +161,25 @@ export default function DrumDissect() {
         gridSize,
         barCount,
         regionStart,
-        regionEnd
+        regionEnd,
+        controller.signal,
+        (event) => {
+          setLoadingProgress(event.progress);
+          setLoadingMessage(event.message);
+        }
       );
       setCurrentPattern(pattern);
       setActivePresetIndex(null);
     } catch (err) {
+      if (controller.signal.aborted) return;
       setError(err.message || 'Server analysis failed');
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) {
+        setLoading(false);
+      }
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
     }
   }, [gridSize, barCount, regionStart, regionEnd]);
 
@@ -208,6 +240,17 @@ export default function DrumDissect() {
 
   const startPlayback = useCallback(() => {
     if (!audioBuffer) return;
+    if (sourceNodeRef.current) {
+      try {
+        sourceNodeRef.current.stop();
+        sourceNodeRef.current.disconnect();
+      } catch { /* */ }
+      sourceNodeRef.current = null;
+    }
+    if (animRef.current) {
+      cancelAnimationFrame(animRef.current);
+      animRef.current = null;
+    }
     let ctx = audioCtxRef.current;
     if (!ctx) {
       const AC = window.AudioContext || window.webkitAudioContext;
@@ -323,6 +366,10 @@ export default function DrumDissect() {
   };
 
   const clearUploadedAudio = useCallback(() => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
     if (animRef.current) {
       cancelAnimationFrame(animRef.current);
       animRef.current = null;
@@ -484,6 +531,21 @@ export default function DrumDissect() {
       if (draggingRef.current) {
         draggingRef.current = null;
         pauseOffsetRef.current = 0;
+        if (isPlayingRef.current) {
+          if (sourceNodeRef.current) {
+            try {
+              sourceNodeRef.current.stop();
+              sourceNodeRef.current.disconnect();
+            } catch { /* */ }
+            sourceNodeRef.current = null;
+          }
+          if (animRef.current) {
+            cancelAnimationFrame(animRef.current);
+            animRef.current = null;
+          }
+          isPlayingRef.current = false;
+          setIsPlaying(false);
+        }
       }
     };
 
@@ -777,8 +839,29 @@ export default function DrumDissect() {
       ) : null}
 
       <div className={`loading-overlay${loading ? ' active' : ''}`}>
-        <div className="loading-orb" />
-        <div className="loading-text">{loadingMessage}</div>
+        <div className="loading-grid-bg" aria-hidden="true">
+          {LOADING_CELLS.map((cell, i) => (
+            <div
+              key={i}
+              className={`loading-cell ${cell.type}${
+                loadingProgress * 100 >= cell.threshold ? ' visible' : ''
+              }`}
+              style={{ animationDelay: `${cell.delay}ms` }}
+            />
+          ))}
+        </div>
+        <div className="loading-content">
+          <div className="loading-bar-track">
+            <div
+              className="loading-bar-fill"
+              style={{ width: `${loadingProgress * 100}%` }}
+            />
+          </div>
+          <div className="loading-status">{loadingMessage}</div>
+          <div className="loading-pct">
+            {Math.round(loadingProgress * 100)}%
+          </div>
+        </div>
       </div>
     </div>
   );

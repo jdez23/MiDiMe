@@ -6,9 +6,6 @@ let _backendAvailable = null;
 let _healthCheckPromise = null;
 
 const api = {
-  /**
-   * Upload an audio file to the backend.
-   */
   uploadAudioFile: async (file, onUploadProgress) => {
     const formData = new FormData();
     formData.append('audio_file', file);
@@ -36,9 +33,6 @@ const api = {
     }
   },
 
-  /**
-   * Check backend health. Result is cached for the session.
-   */
   checkHealth: async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/api/health`);
@@ -48,10 +42,6 @@ const api = {
     }
   },
 
-  /**
-   * Returns true if the backend /api/health endpoint responds.
-   * Caches the result so subsequent calls are instant.
-   */
   isBackendAvailable: async () => {
     if (_backendAvailable !== null) return _backendAvailable;
     if (!_healthCheckPromise) {
@@ -70,16 +60,29 @@ const api = {
   },
 
   /**
-   * Send an audio file to the backend for drum analysis.
+   * Analyse audio via streaming NDJSON.
    *
-   * @param {File} file            Audio file
-   * @param {number} gridSize      Steps per bar (8 | 16 | 32)
-   * @param {number} barCount      Number of bars (1 | 2 | 4)
-   * @param {number} [startTime]   Region start in seconds (optional)
-   * @param {number} [endTime]     Region end in seconds (optional)
-   * @returns {Promise<object>}    Pattern object ready for DrumDissect
+   * The backend streams progress events as newline-delimited JSON.
+   * Each event: { stage, progress (0-1), message, ?pattern }
+   *
+   * @param {File}          file
+   * @param {number}        gridSize
+   * @param {number}        barCount
+   * @param {number}        [startTime]
+   * @param {number}        [endTime]
+   * @param {AbortSignal}   [signal]
+   * @param {function}      [onProgress]  called with each { stage, progress, message }
+   * @returns {Promise<object>} Final pattern object
    */
-  analyzeAudio: async (file, gridSize = 16, barCount = 2, startTime, endTime) => {
+  analyzeAudio: async (
+    file,
+    gridSize = 16,
+    barCount = 2,
+    startTime,
+    endTime,
+    signal,
+    onProgress,
+  ) => {
     const formData = new FormData();
     formData.append('audio_file', file);
     formData.append('grid_size', gridSize);
@@ -89,27 +92,62 @@ const api = {
       formData.append('end_time', endTime);
     }
 
-    try {
-      const response = await axios.post(`${API_BASE_URL}/api/analyze`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 120_000,
-      });
+    const response = await fetch(`${API_BASE_URL}/api/analyze`, {
+      method: 'POST',
+      body: formData,
+      signal,
+      mode: 'cors',
+      credentials: 'omit',
+    });
 
-      const data = response.data;
-      if (data.status !== 'success') {
-        throw new Error(data.message || 'Analysis failed');
-      }
-      return data.pattern;
-    } catch (error) {
-      if (error.response?.data) {
-        throw new Error(
-          error.response.data.message ||
-            JSON.stringify(error.response.data.errors) ||
-            'Analysis failed'
-        );
-      }
-      throw new Error(error.message || 'Network error');
+    if (!response.ok) {
+      let msg = `Server error (${response.status})`;
+      try {
+        const body = await response.json();
+        msg = body.message || msg;
+      } catch { /* non-JSON body */ }
+      throw new Error(msg);
     }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let pattern = null;
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let event;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          continue;
+        }
+
+        if (event.stage === 'error') {
+          throw new Error(event.message || 'Analysis failed');
+        }
+
+        if (onProgress) onProgress(event);
+
+        if (event.stage === 'complete' && event.pattern) {
+          pattern = event.pattern;
+        }
+      }
+    }
+
+    if (!pattern) {
+      throw new Error('No pattern received from server');
+    }
+
+    return pattern;
   },
 };
 

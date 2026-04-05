@@ -31,12 +31,15 @@ db.sqlite3
 db.sqlite3-journal
 /media
 /static
+staticfiles/
 
 # Audio files (temporary uploads)
 backend/storage/uploads/*
 backend/storage/processed/*
+backend/storage/processing/*
 !backend/storage/uploads/.gitkeep
 !backend/storage/processed/.gitkeep
+!backend/storage/processing/.gitkeep
 
 # IDE
 .vscode/

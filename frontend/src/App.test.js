@@ -11,7 +11,7 @@ jest.mock('./services/api', () => ({
 
 test('renders app title', () => {
   render(<App />);
-  expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('MiDiMi');
+  expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('MiDiMe');
   expect(screen.getByText(/pattern visualizer/i)).toBeInTheDocument();
 });
 
