@@ -17,17 +17,41 @@ logger = logging.getLogger(__name__)
 _ANALYSIS_SR = 22050
 
 
+def _apply_min_ioi(onset_times: List[float], min_ioi: float) -> List[float]:
+    """
+    Remove double-triggers by enforcing a minimum inter-onset interval.
+
+    Keeps the first of any pair of onsets that are closer together than *min_ioi*
+    seconds.
+    """
+    if not onset_times:
+        return onset_times
+    filtered = [onset_times[0]]
+    for t in onset_times[1:]:
+        if t - filtered[-1] >= min_ioi:
+            filtered.append(t)
+    return filtered
+
+
 def detect_onsets(
     audio_path: str = None,
     y: np.ndarray = None,
     sr: int = None,
     hop_length: int = 512,
     backtrack: bool = False,
+    delta: float = 0.05,
+    min_ioi: float = 0.03,
 ) -> List[float]:
     """
     Detect onset times in an audio file or pre-loaded array.
 
     Pass *y* and *sr* to skip loading from disk.
+
+    Args:
+        delta:   Onset detection sensitivity threshold (lower = more onsets,
+                 catches ghost notes). Default 0.05 (was librosa default ~0.07).
+        min_ioi: Minimum inter-onset interval in seconds to suppress
+                 double-triggers. Default 30 ms.
     """
     import librosa
 
@@ -39,10 +63,12 @@ def detect_onsets(
         y, sr = librosa.load(audio_path, sr=_ANALYSIS_SR, mono=True)
 
     onset_frames = librosa.onset.onset_detect(
-        y=y, sr=sr, hop_length=hop_length, backtrack=backtrack, units="frames"
+        y=y, sr=sr, hop_length=hop_length, backtrack=backtrack,
+        units="frames", delta=delta,
     )
-    onset_times = librosa.frames_to_time(onset_frames, sr=sr, hop_length=hop_length)
-    return onset_times.tolist()
+    onset_times = librosa.frames_to_time(onset_frames, sr=sr, hop_length=hop_length).tolist()
+    onset_times = _apply_min_ioi(onset_times, min_ioi)
+    return onset_times
 
 
 def detect_onsets_with_strength(

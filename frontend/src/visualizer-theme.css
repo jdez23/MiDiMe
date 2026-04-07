@@ -6,15 +6,15 @@
   --ink-soft: #3d3830;
   --ink-ghost: #8a8279;
   --ink-whisper: #b5ada3;
-  --glow-kick: #ff4d3a;
-  --glow-kick-soft: rgba(255, 77, 58, 0.15);
-  --glow-kick-luminous: rgba(255, 77, 58, 0.6);
-  --glow-snare: #e8c547;
-  --glow-snare-soft: rgba(232, 197, 71, 0.15);
-  --glow-snare-luminous: rgba(232, 197, 71, 0.6);
-  --glow-hat: #3dd68c;
-  --glow-hat-soft: rgba(61, 214, 140, 0.15);
-  --glow-hat-luminous: rgba(61, 214, 140, 0.6);
+  --glow-kick: #ff3b3b;
+  --glow-kick-soft: rgba(255, 59, 59, 0.15);
+  --glow-kick-luminous: rgba(255, 59, 59, 0.6);
+  --glow-snare: #00e5ff;
+  --glow-snare-soft: rgba(0, 229, 255, 0.15);
+  --glow-snare-luminous: rgba(0, 229, 255, 0.6);
+  --glow-hat: #00ff88;
+  --glow-hat-soft: rgba(0, 255, 136, 0.15);
+  --glow-hat-luminous: rgba(0, 255, 136, 0.6);
   --bio-cyan: rgba(120, 220, 255, 0.4);
   --bio-warm: rgba(255, 200, 150, 0.3);
   --danger-soft: rgba(255, 77, 58, 0.2);
@@ -560,56 +560,29 @@ body.visualizer-body::after {
   to   { opacity: 1; }
 }
 
-/* Background grid of forming notes */
+/* Background scatter of forming notes */
 .loading-grid-bg {
   position: absolute;
   inset: 0;
-  display: grid;
-  grid-template-columns: repeat(32, 1fr);
-  grid-template-rows: repeat(3, 1fr);
-  gap: 6px;
-  padding: 18vh 6vw;
   pointer-events: none;
 }
 
 .loading-cell {
-  border-radius: 5px;
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--cell-color, #96d7ff);
   opacity: 0;
   transform: scale(0);
-  transition: opacity 0.8s ease, transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: opacity 0.6s ease, transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .loading-cell.visible {
-  opacity: 1;
+  opacity: 0.85;
   transform: scale(1);
   animation: cellBreath 2.4s ease-in-out infinite alternate;
-}
-
-.loading-cell.kick {
-  background: var(--glow-kick);
-  box-shadow: 0 0 12px var(--glow-kick-soft);
-}
-
-.loading-cell.snare {
-  background: var(--glow-snare);
-  box-shadow: 0 0 12px var(--glow-snare-soft);
-}
-
-.loading-cell.hihat {
-  background: var(--glow-hat);
-  box-shadow: 0 0 12px var(--glow-hat-soft);
-}
-
-.loading-cell.visible.kick {
-  box-shadow: 0 0 18px var(--glow-kick-luminous), 0 0 36px var(--glow-kick-soft);
-}
-
-.loading-cell.visible.snare {
-  box-shadow: 0 0 18px var(--glow-snare-luminous), 0 0 36px var(--glow-snare-soft);
-}
-
-.loading-cell.visible.hihat {
-  box-shadow: 0 0 18px var(--glow-hat-luminous), 0 0 36px var(--glow-hat-soft);
+  box-shadow: 0 0 8px var(--cell-color, #96d7ff);
 }
 
 @keyframes cellBreath {
@@ -953,6 +926,92 @@ body.visualizer-body::after {
   font-variant-numeric: tabular-nums;
 }
 
+.waveform-zoom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.zoom-btn {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--ink-ghost);
+  border-radius: 6px;
+  background: var(--cream-dark);
+  color: var(--ink-soft);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+  padding: 0;
+}
+
+.zoom-btn:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--cream);
+}
+
+.zoom-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.zoom-label {
+  font-size: 10px;
+  font-family: 'DM Mono', monospace;
+  color: var(--ink-ghost);
+  min-width: 22px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.waveform-minimap-wrap {
+  position: relative;
+  width: 100%;
+  margin-top: 6px;
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: crosshair;
+  user-select: none;
+}
+
+.waveform-minimap-wrap:active {
+  cursor: col-resize;
+}
+
+.waveform-minimap {
+  display: block;
+  width: 100%;
+  height: 28px;
+  background: var(--cream-deep);
+}
+
+.minimap-region {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(150, 215, 255, 0.18);
+  border-left: 1.5px solid rgba(150, 215, 255, 0.7);
+  border-right: 1.5px solid rgba(150, 215, 255, 0.7);
+  pointer-events: none;
+}
+
+.minimap-playhead {
+  position: absolute;
+  top: 0;
+  width: 1.5px;
+  height: 100%;
+  background: var(--ink);
+  opacity: 0.6;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
 .analyze-btn {
   flex-shrink: 0;
   height: 34px;
@@ -1209,6 +1268,29 @@ body.visualizer-body::after {
 .grid-cell.downbeat {
   border-radius: 14px;
   box-shadow: inset 0 0 0 1px var(--cream-deep);
+}
+
+.grid-cell.active-col {
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.grid-cell.active-col.active-kick {
+  box-shadow:
+    0 0 14px var(--glow-kick-luminous),
+    inset 0 0 0 2px rgba(255, 255, 255, 0.3);
+}
+
+.grid-cell.active-col.active-snare {
+  box-shadow:
+    0 0 14px var(--glow-snare-luminous),
+    inset 0 0 0 2px rgba(255, 255, 255, 0.3);
+}
+
+.grid-cell.active-col.active-hihat {
+  box-shadow:
+    0 0 14px var(--glow-hat-luminous),
+    inset 0 0 0 2px rgba(255, 255, 255, 0.3);
 }
 
 .grid-cell:hover {

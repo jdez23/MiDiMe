@@ -35,7 +35,7 @@ function App() {
           <DrumDissect />
         </main>
 
-        <footer className="app-footer">MiDiMe — local analyze, MIDI export, optional API upload</footer>
+        <footer className="app-footer">MiDiMe by Cycles Studios — Est. 2022</footer>
       </div>
     </>
   );

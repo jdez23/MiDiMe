@@ -24,6 +24,9 @@ function formatTime(seconds) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+const GRADIENT_COLORS = ['#96d7ff', '#c8aaff', '#ffb4c8', '#ffdc96'];
+const ZOOM_LEVELS = [1, 2, 4, 8];
+
 const ROW_CONFIG = [
   { label: 'Kick', cls: 'kick', row: 'kick', vel: 'kickVel' },
   { label: 'Snare', cls: 'snare', row: 'snare', vel: 'snareVel' },
@@ -68,6 +71,8 @@ export default function DrumDissect() {
   const [hydrated, setHydrated] = useState(false);
   const [regionStart, setRegionStart] = useState(0);
   const [regionEnd, setRegionEnd] = useState(MAX_REGION);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [zoomOffset, setZoomOffset] = useState(0);
 
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
@@ -79,9 +84,13 @@ export default function DrumDissect() {
   const animRef = useRef(null);
   const isPlayingRef = useRef(false);
   const uploadedFileRef = useRef(null);
-  const draggingRef = useRef(null);
-  const dragOriginRef = useRef({ x: 0, rStart: 0, rEnd: 0 });
   const abortRef = useRef(null);
+  const draggingRef = useRef(null);
+  const tickFnRef = useRef(null);
+  // Stable function reference whose identity never changes — RAF always calls this,
+  // and it delegates to tickFnRef.current which IS updated every render.
+  const stableTick = useRef(function stableTick() { tickFnRef.current?.(); });
+  const dragOriginRef = useRef({ x: 0, rStart: 0, rEnd: 0 });
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -132,10 +141,11 @@ export default function DrumDissect() {
 
   const LOADING_CELLS = useMemo(
     () =>
-      Array.from({ length: 96 }, (_, i) => ({
-        type: ['kick', 'snare', 'hihat'][Math.floor(i / 32)],
-        threshold: Math.random() * 90 + 5,
-        delay: Math.random() * 600,
+      Array.from({ length: 200 }, (_, i) => ({
+        top: Math.random() * 100,
+        left: Math.random() * 100,
+        color: GRADIENT_COLORS[i % GRADIENT_COLORS.length],
+        delay: Math.random() * 200,
       })),
     []
   );
@@ -195,6 +205,7 @@ export default function DrumDissect() {
   // --- Playback (scoped to selected region) ---
   const stopPlayback = useCallback(() => {
     if (sourceNodeRef.current) {
+      sourceNodeRef.current.onended = null;
       try {
         sourceNodeRef.current.stop();
         sourceNodeRef.current.disconnect();
@@ -219,7 +230,8 @@ export default function DrumDissect() {
     }
   }, [audioBuffer, regionStart]);
 
-  const tickPlayhead = useCallback(() => {
+  // Keep tickFnRef current every render so the rAF loop always reads fresh values
+  tickFnRef.current = () => {
     const ctx = audioCtxRef.current;
     const buf = audioBuffer;
     if (!ctx || !buf || !isPlayingRef.current) return;
@@ -235,12 +247,17 @@ export default function DrumDissect() {
     const absTime = regionStart + elapsed;
     setPlayheadPct((absTime / buf.duration) * 100);
     setTimeDisplay(formatTime(elapsed));
-    animRef.current = requestAnimationFrame(tickPlayhead);
-  }, [audioBuffer, regionStart, regionDur]);
+    animRef.current = requestAnimationFrame(stableTick.current);
+  };
+
+  const tickPlayhead = useCallback(() => {
+    stableTick.current();
+  }, []);
 
   const startPlayback = useCallback(() => {
     if (!audioBuffer) return;
     if (sourceNodeRef.current) {
+      sourceNodeRef.current.onended = null;
       try {
         sourceNodeRef.current.stop();
         sourceNodeRef.current.disconnect();
@@ -279,7 +296,7 @@ export default function DrumDissect() {
       sourceNodeRef.current = null;
     };
     animRef.current = requestAnimationFrame(tickPlayhead);
-  }, [audioBuffer, tickPlayhead, regionStart, regionDur]);
+  }, [audioBuffer, regionStart, regionDur, tickPlayhead]);
 
   const togglePlay = useCallback(() => {
     if (!audioBuffer) return;
@@ -316,14 +333,16 @@ export default function DrumDissect() {
 
   useLayoutEffect(() => {
     if (!audioBuffer || !waveformWrapRef.current) return;
+    const viewEnd = Math.min(1, zoomOffset + 1 / zoomLevel);
+    const win = zoomLevel > 1 ? { start: zoomOffset, end: viewEnd } : null;
     const el = waveformWrapRef.current;
     const ro = new ResizeObserver(() => {
-      drawWaveform(canvasRef.current, audioBuffer);
+      drawWaveform(canvasRef.current, audioBuffer, win);
     });
     ro.observe(el);
-    drawWaveform(canvasRef.current, audioBuffer);
+    drawWaveform(canvasRef.current, audioBuffer, win);
     return () => ro.disconnect();
-  }, [audioBuffer]);
+  }, [audioBuffer, zoomLevel, zoomOffset]);
 
   // --- File handling: send to backend ---
   const handleFile = async (file) => {
@@ -358,6 +377,8 @@ export default function DrumDissect() {
     setTimeDisplay('0:00');
     setRegionStart(0);
     setRegionEnd(Math.min(buf.duration, MAX_REGION));
+    setZoomLevel(1);
+    setZoomOffset(0);
   };
 
   const loadPreset = (i) => {
@@ -396,6 +417,8 @@ export default function DrumDissect() {
     setRegionStart(0);
     setRegionEnd(MAX_REGION);
     uploadedFileRef.current = null;
+    setZoomLevel(1);
+    setZoomOffset(0);
   }, [gridSize, barCount]);
 
   const onExportMidi = () => {
@@ -423,34 +446,127 @@ export default function DrumDissect() {
     });
   };
 
-  const onWaveformClick = (e) => {
-    if (!audioBuffer || !waveformWrapRef.current) return;
-    if (draggingRef.current) return;
-    const rect = waveformWrapRef.current.getBoundingClientRect();
-    const pct = (e.clientX - rect.left) / rect.width;
-    const clickTime = pct * audioBuffer.duration;
-    const clamped = Math.max(regionStart, Math.min(regionEnd, clickTime));
-    pauseOffsetRef.current = clamped - regionStart;
-    if (isPlayingRef.current && sourceNodeRef.current) {
-      try {
-        sourceNodeRef.current.stop();
-        sourceNodeRef.current.disconnect();
-      } catch {
-        /* */
+
+  const zoomIn = useCallback(() => {
+    setZoomLevel((prev) => {
+      const idx = ZOOM_LEVELS.indexOf(prev);
+      if (idx === ZOOM_LEVELS.length - 1) return prev;
+      const next = ZOOM_LEVELS[idx + 1];
+      // Keep the center of the current view centered after zoom
+      const viewCenter = zoomOffset + 1 / (prev * 2);
+      const newOffset = Math.max(0, Math.min(1 - 1 / next, viewCenter - 1 / (next * 2)));
+      setZoomOffset(newOffset);
+      return next;
+    });
+  }, [zoomOffset]);
+
+  const zoomOut = useCallback(() => {
+    setZoomLevel((prev) => {
+      const idx = ZOOM_LEVELS.indexOf(prev);
+      if (idx === 0) return prev;
+      const next = ZOOM_LEVELS[idx - 1];
+      const viewCenter = zoomOffset + 1 / (prev * 2);
+      const newOffset = Math.max(0, Math.min(1 - 1 / next, viewCenter - 1 / (next * 2)));
+      setZoomOffset(newOffset);
+      return next;
+    });
+  }, [zoomOffset]);
+
+  const onWaveformWheel = useCallback(
+    (e) => {
+      if (!audioBuffer) return;
+      e.preventDefault();
+      if (e.deltaY < 0) zoomIn();
+      else zoomOut();
+    },
+    [audioBuffer, zoomIn, zoomOut]
+  );
+
+  useEffect(() => {
+    const el = waveformWrapRef.current;
+    if (!el) return;
+    el.addEventListener('wheel', onWaveformWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWaveformWheel);
+  }, [onWaveformWheel]);
+
+  const pxToTime = useCallback(
+    (clientX) => {
+      if (!waveformWrapRef.current || !audioBuffer) return 0;
+      const rect = waveformWrapRef.current.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      return zoomOffset * audioBuffer.duration + pct * (audioBuffer.duration / zoomLevel);
+    },
+    [audioBuffer, zoomLevel, zoomOffset]
+  );
+
+  const onHandleDown = useCallback(
+    (which, e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      draggingRef.current = which;
+      const x = e.touches ? e.touches[0].clientX : e.clientX;
+      dragOriginRef.current = { x, rStart: regionStart, rEnd: regionEnd };
+    },
+    [regionStart, regionEnd]
+  );
+
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!draggingRef.current || !audioBuffer) return;
+      const x = e.touches ? e.touches[0].clientX : e.clientX;
+      const t = pxToTime(x);
+      const which = draggingRef.current;
+
+      if (which === 'start') {
+        const ns = Math.max(0, Math.min(regionEnd - MIN_REGION, t));
+        const clamped = ns < regionEnd - MAX_REGION ? regionEnd - MAX_REGION : ns;
+        setRegionStart(clamped);
+        pauseOffsetRef.current = 0;
+        setPlayheadPct((clamped / audioBuffer.duration) * 100);
+      } else if (which === 'end') {
+        const ne = Math.min(audioBuffer.duration, Math.max(regionStart + MIN_REGION, t));
+        const clamped = ne > regionStart + MAX_REGION ? regionStart + MAX_REGION : ne;
+        setRegionEnd(clamped);
+      } else if (which === 'region') {
+        const delta = t - pxToTime(dragOriginRef.current.x);
+        const len = dragOriginRef.current.rEnd - dragOriginRef.current.rStart;
+        let ns = dragOriginRef.current.rStart + delta;
+        if (ns < 0) ns = 0;
+        if (ns + len > audioBuffer.duration) ns = audioBuffer.duration - len;
+        setRegionStart(ns);
+        setRegionEnd(ns + len);
+        pauseOffsetRef.current = 0;
+        setPlayheadPct((ns / audioBuffer.duration) * 100);
       }
-      sourceNodeRef.current = null;
-      setIsPlaying(false);
-      isPlayingRef.current = false;
-      if (animRef.current) cancelAnimationFrame(animRef.current);
-      startPlayback();
-    } else {
-      setPlayheadPct(pct * 100);
-      setTimeDisplay(formatTime(pauseOffsetRef.current));
-    }
-  };
+    };
+
+    const onUp = () => {
+      if (draggingRef.current) {
+        draggingRef.current = null;
+        pauseOffsetRef.current = 0;
+      }
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+    };
+  }, [audioBuffer, regionStart, regionEnd, pxToTime]);
 
   const spb = gridSize / 4;
   const steps = currentPattern?.steps ?? gridSize * barCount;
+  const activeStep =
+    isPlaying && audioBuffer
+      ? Math.floor(
+          (((playheadPct / 100) * audioBuffer.duration - regionStart) / regionDur) * steps
+        )
+      : -1;
 
   const analysis = currentPattern && {
     bpm: currentPattern.bpm,
@@ -476,90 +592,111 @@ export default function DrumDissect() {
 
   // --- Region drag interaction ---
   const dur = audioBuffer?.duration ?? 1;
-  const regionLeftPct = (regionStart / dur) * 100;
-  const regionWidthPct = ((regionEnd - regionStart) / dur) * 100;
+  // When zoomed, positions are relative to the visible view window
+  const viewDur = dur / zoomLevel;
+  const viewStart = zoomOffset * dur;
+  const regionLeftPct = ((regionStart - viewStart) / viewDur) * 100;
+  const regionWidthPct = ((regionEnd - regionStart) / viewDur) * 100;
+  // Playhead as % of visible window
+  const playheadInViewPct =
+    audioBuffer
+      ? (((playheadPct / 100) * dur - viewStart) / viewDur) * 100
+      : playheadPct;
   const regionLabel = `${formatTime(regionStart)} — ${formatTime(regionEnd)}`;
 
-  const pxToTime = useCallback(
-    (clientX) => {
-      if (!waveformWrapRef.current || !audioBuffer) return 0;
-      const rect = waveformWrapRef.current.getBoundingClientRect();
-      const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-      return pct * audioBuffer.duration;
-    },
-    [audioBuffer]
-  );
-
-  const onHandleDown = useCallback(
-    (which, e) => {
+  const onWaveformMouseDown = useCallback(
+    (e) => {
+      if (!audioBuffer || !waveformWrapRef.current) return;
       e.preventDefault();
-      e.stopPropagation();
-      draggingRef.current = which;
-      const x = e.touches ? e.touches[0].clientX : e.clientX;
-      dragOriginRef.current = { x, rStart: regionStart, rEnd: regionEnd };
-    },
-    [regionStart, regionEnd]
-  );
 
-  useEffect(() => {
-    const onMove = (e) => {
-      if (!draggingRef.current || !audioBuffer) return;
-      const x = e.touches ? e.touches[0].clientX : e.clientX;
-      const t = pxToTime(x);
-      const which = draggingRef.current;
+      const getTime = (clientX) => {
+        const rect = waveformWrapRef.current.getBoundingClientRect();
+        const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        return zoomOffset * audioBuffer.duration + pct * (audioBuffer.duration / zoomLevel);
+      };
 
-      if (which === 'start') {
-        const ns = Math.max(0, Math.min(regionEnd - MIN_REGION, t));
-        const clamped = regionEnd - ns > MAX_REGION ? regionEnd - MAX_REGION : ns;
-        setRegionStart(clamped);
-      } else if (which === 'end') {
-        const ne = Math.min(audioBuffer.duration, Math.max(regionStart + MIN_REGION, t));
-        const clamped = ne - regionStart > MAX_REGION ? regionStart + MAX_REGION : ne;
-        setRegionEnd(clamped);
-      } else if (which === 'region') {
-        const delta = t - pxToTime(dragOriginRef.current.x);
-        const len = dragOriginRef.current.rEnd - dragOriginRef.current.rStart;
-        let ns = dragOriginRef.current.rStart + delta;
-        if (ns < 0) ns = 0;
-        if (ns + len > audioBuffer.duration) ns = audioBuffer.duration - len;
-        setRegionStart(ns);
-        setRegionEnd(ns + len);
-      }
-    };
+      const startX = e.clientX;
+      const startTime = getTime(startX);
+      const startZoomOffset = zoomOffset;
+      const rect = waveformWrapRef.current.getBoundingClientRect();
+      const inSelection = zoomLevel > 1 && startTime >= regionStart && startTime <= regionEnd;
 
-    const onUp = () => {
-      if (draggingRef.current) {
-        draggingRef.current = null;
-        pauseOffsetRef.current = 0;
-        if (isPlayingRef.current) {
-          if (sourceNodeRef.current) {
-            try {
-              sourceNodeRef.current.stop();
-              sourceNodeRef.current.disconnect();
-            } catch { /* */ }
-            sourceNodeRef.current = null;
+      let dragging = false;
+      let mode = null;
+
+      const onMove = (ev) => {
+        const dx = ev.clientX - startX;
+        if (!dragging && Math.abs(dx) > 3) {
+          dragging = true;
+          mode = inSelection ? 'pan' : 'select';
+          if (mode === 'select') {
+            if (isPlayingRef.current) {
+              if (sourceNodeRef.current) {
+                sourceNodeRef.current.onended = null;
+                try { sourceNodeRef.current.stop(); sourceNodeRef.current.disconnect(); } catch { /* */ }
+                sourceNodeRef.current = null;
+              }
+              if (animRef.current) { cancelAnimationFrame(animRef.current); animRef.current = null; }
+              isPlayingRef.current = false;
+              setIsPlaying(false);
+            }
+            pauseOffsetRef.current = 0;
+            setRegionStart(startTime);
+            setRegionEnd(startTime);
+            setPlayheadPct((startTime / audioBuffer.duration) * 100);
           }
-          if (animRef.current) {
-            cancelAnimationFrame(animRef.current);
-            animRef.current = null;
-          }
-          isPlayingRef.current = false;
-          setIsPlaying(false);
         }
-      }
-    };
+        if (!dragging) return;
 
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    window.addEventListener('touchmove', onMove, { passive: false });
-    window.addEventListener('touchend', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      window.removeEventListener('touchmove', onMove);
-      window.removeEventListener('touchend', onUp);
-    };
-  }, [audioBuffer, regionStart, regionEnd, pxToTime]);
+        if (mode === 'pan') {
+          const fracDelta = dx / rect.width;
+          const timeDelta = fracDelta * (audioBuffer.duration / zoomLevel);
+          const newOffset = Math.max(0, Math.min(1 - 1 / zoomLevel,
+            startZoomOffset - timeDelta / audioBuffer.duration));
+          setZoomOffset(newOffset);
+        } else {
+          const t = getTime(ev.clientX);
+          if (t >= startTime) {
+            setRegionStart(startTime);
+            setRegionEnd(Math.min(audioBuffer.duration, Math.min(startTime + MAX_REGION, t)));
+            setPlayheadPct((startTime / audioBuffer.duration) * 100);
+          } else {
+            const ns = Math.max(0, Math.max(startTime - MAX_REGION, t));
+            setRegionStart(ns);
+            setRegionEnd(startTime);
+            setPlayheadPct((ns / audioBuffer.duration) * 100);
+          }
+        }
+      };
+
+      const onUp = (ev) => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        if (!dragging) {
+          // Plain click → seek
+          const clickTime = getTime(ev.clientX);
+          const clamped = Math.max(regionStart, Math.min(regionEnd, clickTime));
+          pauseOffsetRef.current = clamped - regionStart;
+          if (isPlayingRef.current && sourceNodeRef.current) {
+            sourceNodeRef.current.onended = null;
+            try { sourceNodeRef.current.stop(); sourceNodeRef.current.disconnect(); } catch { /* */ }
+            sourceNodeRef.current = null;
+            setIsPlaying(false);
+            isPlayingRef.current = false;
+            if (animRef.current) cancelAnimationFrame(animRef.current);
+            startPlayback();
+          } else {
+            setPlayheadPct((clamped / audioBuffer.duration) * 100);
+            setTimeDisplay(formatTime(clamped - regionStart));
+          }
+        }
+      };
+
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    },
+    [audioBuffer, zoomLevel, zoomOffset, regionStart, regionEnd, startPlayback]
+  );
 
   const shellClass = `drop-zone-shell${dragOver ? ' drop-zone-shell--dragover' : ''}`;
 
@@ -637,6 +774,27 @@ export default function DrumDissect() {
             </button>
           </div>
           <p className="region-label">{regionLabel}</p>
+          <div className="waveform-zoom-bar">
+            <button
+              type="button"
+              className="zoom-btn"
+              aria-label="Zoom out"
+              disabled={zoomLevel === 1}
+              onClick={zoomOut}
+            >
+              −
+            </button>
+            <span className="zoom-label">{zoomLevel}×</span>
+            <button
+              type="button"
+              className="zoom-btn"
+              aria-label="Zoom in"
+              disabled={zoomLevel === 8}
+              onClick={zoomIn}
+            >
+              +
+            </button>
+          </div>
           <div className="transport">
             <button
               type="button"
@@ -649,37 +807,46 @@ export default function DrumDissect() {
             <div
               ref={waveformWrapRef}
               className="waveform-container"
-              onClick={onWaveformClick}
+              onMouseDown={onWaveformMouseDown}
               role="presentation"
+              style={{ cursor: 'crosshair' }}
             >
               <canvas ref={canvasRef} className="waveform-canvas" />
-              <div
-                className="region-dim"
-                style={{ left: 0, width: `${regionLeftPct}%` }}
-              />
-              <div
-                className="region-dim"
-                style={{ left: `${regionLeftPct + regionWidthPct}%`, right: 0, width: 'auto' }}
-              />
-              <div
-                className="waveform-region"
-                style={{ left: `${regionLeftPct}%`, width: `${regionWidthPct}%` }}
-                onMouseDown={(e) => onHandleDown('region', e)}
-                onTouchStart={(e) => onHandleDown('region', e)}
-              />
-              <div
-                className="region-handle region-handle--start"
-                style={{ left: `${regionLeftPct}%` }}
-                onMouseDown={(e) => onHandleDown('start', e)}
-                onTouchStart={(e) => onHandleDown('start', e)}
-              />
-              <div
-                className="region-handle region-handle--end"
-                style={{ left: `${regionLeftPct + regionWidthPct}%` }}
-                onMouseDown={(e) => onHandleDown('end', e)}
-                onTouchStart={(e) => onHandleDown('end', e)}
-              />
-              <div className="playhead" style={{ left: `${playheadPct}%` }} />
+              {regionEnd > regionStart && (
+                <>
+                  <div
+                    className="region-dim"
+                    style={{ left: 0, width: `${Math.max(0, regionLeftPct)}%` }}
+                  />
+                  <div
+                    className="region-dim"
+                    style={{
+                      left: `${Math.min(100, regionLeftPct + regionWidthPct)}%`,
+                      right: 0,
+                      width: 'auto',
+                    }}
+                  />
+                  <div
+                    className="waveform-region"
+                    style={{ left: `${regionLeftPct}%`, width: `${regionWidthPct}%` }}
+                    onMouseDown={(e) => onHandleDown('region', e)}
+                    onTouchStart={(e) => onHandleDown('region', e)}
+                  />
+                  <div
+                    className="region-handle region-handle--start"
+                    style={{ left: `${regionLeftPct}%` }}
+                    onMouseDown={(e) => onHandleDown('start', e)}
+                    onTouchStart={(e) => onHandleDown('start', e)}
+                  />
+                  <div
+                    className="region-handle region-handle--end"
+                    style={{ left: `${regionLeftPct + regionWidthPct}%` }}
+                    onMouseDown={(e) => onHandleDown('end', e)}
+                    onTouchStart={(e) => onHandleDown('end', e)}
+                  />
+                </>
+              )}
+              <div className="playhead" style={{ left: `${playheadInViewPct}%` }} />
             </div>
             <span className="time-display">{timeDisplay}</span>
           </div>
@@ -722,40 +889,6 @@ export default function DrumDissect() {
         </>
       ) : null}
 
-      <div className={(audioBuffer || currentPattern) ? 'controls-row' : 'controls-row hidden'}>
-        <div className="control-group">
-          <span className="control-label">Grid</span>
-          <select
-            className="grid-select"
-            value={gridSize}
-            onChange={(e) => setGridSize(Number(e.target.value))}
-            aria-label="Steps per bar"
-          >
-            <option value={8}>8 steps</option>
-            <option value={16}>16 steps</option>
-            <option value={32}>32 steps</option>
-          </select>
-        </div>
-        <div className="control-group">
-          <span className="control-label">Bars</span>
-          <select
-            className="grid-select"
-            value={barCount}
-            onChange={(e) => setBarCount(Number(e.target.value))}
-            aria-label="Number of bars"
-          >
-            <option value={1}>1 bar</option>
-            <option value={2}>2 bars</option>
-            <option value={4}>4 bars</option>
-          </select>
-        </div>
-        {currentPattern && (
-          <button type="button" className="export-btn" onClick={onExportMidi}>
-            Export MIDI
-          </button>
-        )}
-      </div>
-
       <div className={analysis ? 'analysis-info' : 'analysis-info hidden'}>
         <div className="info-card">
           <div className="info-card-label">Style</div>
@@ -784,6 +917,37 @@ export default function DrumDissect() {
           <div className="section-header">
             <span className="section-title">Pattern Grid</span>
             <div className="section-line" />
+          </div>
+          <div className="controls-row">
+            <div className="control-group">
+              <span className="control-label">Grid</span>
+              <select
+                className="grid-select"
+                value={gridSize}
+                onChange={(e) => setGridSize(Number(e.target.value))}
+                aria-label="Steps per bar"
+              >
+                <option value={8}>8 steps</option>
+                <option value={16}>16 steps</option>
+                <option value={32}>32 steps</option>
+              </select>
+            </div>
+            <div className="control-group">
+              <span className="control-label">Bars</span>
+              <select
+                className="grid-select"
+                value={barCount}
+                onChange={(e) => setBarCount(Number(e.target.value))}
+                aria-label="Number of bars"
+              >
+                <option value={1}>1 bar</option>
+                <option value={2}>2 bars</option>
+                <option value={4}>4 bars</option>
+              </select>
+            </div>
+            <button type="button" className="export-btn" onClick={onExportMidi}>
+              Export MIDI
+            </button>
           </div>
           <div className="grid-wrapper">
             <div className="grid-header">
@@ -815,7 +979,7 @@ export default function DrumDissect() {
                         type="button"
                         className={`grid-cell${db ? ' downbeat' : ''}${
                           active ? ` active-${row.cls}` : ''
-                        }`}
+                        }${i === activeStep ? ' active-col' : ''}`}
                         style={active ? { opacity: 0.5 + v * 0.5 } : undefined}
                         title={
                           active
@@ -843,10 +1007,13 @@ export default function DrumDissect() {
           {LOADING_CELLS.map((cell, i) => (
             <div
               key={i}
-              className={`loading-cell ${cell.type}${
-                loadingProgress * 100 >= cell.threshold ? ' visible' : ''
-              }`}
-              style={{ animationDelay: `${cell.delay}ms` }}
+              className={`loading-cell${cell.left < loadingProgress * 120 ? ' visible' : ''}`}
+              style={{
+                top: `${cell.top}%`,
+                left: `${cell.left}%`,
+                '--cell-color': cell.color,
+                animationDelay: `${cell.delay}ms`,
+              }}
             />
           ))}
         </div>
